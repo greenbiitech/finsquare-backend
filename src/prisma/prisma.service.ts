@@ -11,33 +11,33 @@ export class PrismaService
   private readonly logger = new Logger(PrismaService.name);
 
   constructor() {
-    const connectionString = process.env.DATABASE_URL || '';
+    let connectionString = process.env.DATABASE_URL || '';
 
     // Determine SSL config: check DB_SSL env var, or auto-detect based on hostname
     const isLocalhost = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
     const forceSSL = process.env.DB_SSL === 'true';
     const disableSSL = process.env.DB_SSL === 'false';
-
-    let sslConfig: boolean | { rejectUnauthorized: boolean } = false;
-    if (disableSSL) {
-      sslConfig = false;
-    } else if (forceSSL || !isLocalhost) {
-      sslConfig = { rejectUnauthorized: false };
-    }
+    const useSSL = disableSSL ? false : (forceSSL || !isLocalhost);
 
     // Log before super() - can't use this.logger yet
-    console.log(`[PrismaService] DB SSL config: ${JSON.stringify(sslConfig)}, isLocalhost: ${isLocalhost}`);
+    console.log(`[PrismaService] useSSL: ${useSSL}, isLocalhost: ${isLocalhost}`);
 
-    const pool = new pg.Pool({
+    // Configure pg.Pool with SSL
+    const poolConfig: pg.PoolConfig = {
       connectionString,
-      ssl: sslConfig,
-    });
+    };
+
+    if (useSSL) {
+      poolConfig.ssl = { rejectUnauthorized: false };
+    }
+
+    const pool = new pg.Pool(poolConfig);
     const adapter = new PrismaPg(pool);
     super({ adapter });
   }
 
   async onModuleInit() {
-    await this.$connect();
+    // Don't call $connect() - pool handles connections with proper SSL
     await this.seedDefaults();
   }
 
