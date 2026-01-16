@@ -25,7 +25,8 @@ export class PrismaService
       sslConfig = { rejectUnauthorized: false };
     }
 
-    this.logger.log(`DB SSL config: ${JSON.stringify(sslConfig)}, isLocalhost: ${isLocalhost}`);
+    // Log before super() - can't use this.logger yet
+    console.log(`[PrismaService] DB SSL config: ${JSON.stringify(sslConfig)}, isLocalhost: ${isLocalhost}`);
 
     const pool = new pg.Pool({
       connectionString,
