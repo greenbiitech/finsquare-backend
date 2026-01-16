@@ -1,0 +1,7 @@
+export * from './initiate-bvn.dto';
+export * from './verify-bvn.dto';
+export * from './verify-bvn-otp.dto';
+export * from './complete-step2.dto';
+export * from './complete-step3.dto';
+export * from './complete-step4.dto';
+export * from './complete-step5.dto';

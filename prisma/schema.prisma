@@ -1,0 +1,272 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// AUTH MODELS
+// ============================================
+
+model otp_verifications {
+  id          String   @id @default(uuid())
+  email       String
+  phoneNumber String
+  password    String
+  firstName   String
+  lastName    String
+  fullName    String
+  otp         String
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+}
+
+model PasswordReset {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  otp       String
+  verified  Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_resets")
+}
+
+// ============================================
+// USER MODEL
+// ============================================
+
+model User {
+  id                    String           @id @default(uuid())
+  email                 String           @unique
+  phoneNumber           String           @unique
+  password              String
+  firstName             String
+  lastName              String
+  fullName              String
+  isVerified            Boolean          @default(true)
+  hasPasskey            Boolean          @default(false)
+  hasPickedMembership   Boolean          @default(false)
+  passkey               String?
+  isActive              Boolean          @default(true)
+  isBanned              Boolean          @default(false)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  // Device info for push notifications
+  fcmToken              String?
+  devicePlatform        String?
+
+  // Wallet setup tracking
+  walletSetupStep       WalletSetupStep  @default(NOT_STARTED)
+  walletSetupData       Json?
+
+  // KYC fields
+  bvn                   String?
+  bvnData               Json?
+  nin                   String?
+  ninData               Json?
+  dob                   String?
+  gender                String?
+
+  // Address fields
+  address               String?
+  state                 String?
+  lga                   String?
+  city                  String?
+
+  // Document fields
+  photo                 String?
+  proofOfAddress        String?
+  skippedProofOfAddress Boolean          @default(false)
+
+  // Transaction PIN (for wallet transactions)
+  transactionPin        String?
+
+  // Relations
+  passwordResets        PasswordReset[]
+  memberships           Membership[]
+  wallets               Wallet[]
+  joinRequests          JoinRequest[]
+
+  @@map("users")
+}
+
+// ============================================
+// COMMUNITY MODELS
+// ============================================
+
+model Community {
+  id                  String             @id @default(uuid())
+  name                String             @unique
+  description         String?
+  logo                String?
+  color               String?
+  isDefault           Boolean            @default(false)
+  isActive            Boolean            @default(true)
+  isRegistered        Boolean            @default(false)
+  proofOfAddress      String?
+  cacDocument         String?
+  addressVerification String?
+  createdById         String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  invites             CommunityInvite[]
+  communityWallet     community_wallets?
+  joinRequests        JoinRequest[]
+  members             Membership[]
+
+  @@map("communities")
+}
+
+model CommunityInvite {
+  id            String        @id @default(uuid())
+  communityId   String
+  type          InviteType    @default(LINK)
+  joinType      JoinType      @default(OPEN)
+  token         String        @unique
+  email         String?
+  maxMembers    Int?
+  usedCount     Int           @default(0)
+  expiresAt     DateTime?
+  isActive      Boolean       @default(true)
+  invitedById   String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  community     Community     @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  joinRequests  JoinRequest[]
+
+  @@index([communityId])
+  @@index([token])
+  @@map("community_invites")
+}
+
+model Membership {
+  id          String        @id @default(uuid())
+  userId      String
+  communityId String
+  role        CommunityRole @default(MEMBER)
+  isActive    Boolean       @default(true)
+  joinedAt    DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  community   Community     @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, communityId])
+  @@index([userId])
+  @@index([communityId])
+  @@map("memberships")
+}
+
+model JoinRequest {
+  id          String            @id @default(uuid())
+  userId      String
+  communityId String
+  inviteId    String?
+  status      JoinRequestStatus @default(PENDING)
+  respondedBy String?
+  respondedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  community   Community         @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  invite      CommunityInvite?  @relation(fields: [inviteId], references: [id])
+
+  @@unique([userId, communityId])
+  @@index([communityId])
+  @@index([status])
+  @@map("join_requests")
+}
+
+// ============================================
+// WALLET MODELS
+// ============================================
+
+model Wallet {
+  id                    String      @id @default(uuid())
+  userId                String
+  walletType            WalletType  @default(MAIN)
+  balance               Float       @default(0)
+  totalDeposit          Float       @default(0)
+  totalWithdraw         Float       @default(0)
+  isActive              Boolean     @default(true)
+  isDeleted             Boolean     @default(false)
+  isBanned              Boolean     @default(false)
+  externalWalletId      String?
+  externalWalletDetails Json?
+  transactionPin        String?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  user                  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, walletType])
+  @@index([userId])
+  @@map("wallets")
+}
+
+model community_wallets {
+  id                    String    @id @default(uuid())
+  communityId           String    @unique
+  balance               Decimal   @default(0) @db.Decimal(12, 2)
+  signatories           Json?
+  externalWalletId      String?
+  externalWalletDetails Json?
+  isActive              Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  community             Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum WalletSetupStep {
+  NOT_STARTED
+  BVN_VERIFIED
+  PERSONAL_INFO
+  FACE_VERIFIED
+  PROOF_OF_ADDRESS
+  COMPLETED
+}
+
+enum WalletType {
+  MAIN
+  SAVINGS
+  GROUPBUYING
+  ESUSU
+  CONTRIBUTION
+}
+
+enum CommunityRole {
+  ADMIN
+  CO_ADMIN
+  MEMBER
+}
+
+enum InviteType {
+  LINK
+  EMAIL
+}
+
+enum JoinType {
+  OPEN
+  APPROVAL_REQUIRED
+}
+
+enum JoinRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
