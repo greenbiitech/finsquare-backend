@@ -237,8 +237,14 @@ export class PsbWaasService {
 
       this.logger.log(`Transaction history response status: ${response.data?.status}`);
       return response.data;
-    } catch (error) {
-      this.logger.error('Failed to fetch transaction history:', error);
+    } catch (error: any) {
+      if (error.response) {
+        this.logger.error(`Transaction history API error - Status: ${error.response.status}, Data:`, error.response.data);
+      } else if (error.request) {
+        this.logger.error('Transaction history API error - No response received:', error.message);
+      } else {
+        this.logger.error('Transaction history API error:', error.message);
+      }
       return { status: 'FAILED', message: 'Failed to fetch transaction history' };
     }
   }

@@ -879,6 +879,7 @@ export class WalletService {
     const to = toDate || formatDate(today);
 
     // Fetch from 9PSB
+    this.logger.log(`Calling 9PSB transaction history: account=${accountNumber}, from=${from}, to=${to}`);
     const response = await this.psbWaasService.getTransactionHistory(
       accountNumber,
       from,
@@ -886,8 +887,10 @@ export class WalletService {
       limit,
     );
 
+    this.logger.log(`9PSB transaction history response: status=${response.status}, txCount=${response.data?.length ?? 0}`);
+
     if (response.status !== 'SUCCESS') {
-      this.logger.warn(`Failed to fetch transaction history: ${response.message}`);
+      this.logger.warn(`Failed to fetch transaction history from 9PSB: ${response.message}. Falling back to local.`);
       // Return local transactions as fallback
       return this.getLocalTransactionHistory(userId, limit);
     }
@@ -899,6 +902,7 @@ export class WalletService {
         fromDate: from,
         toDate: to,
         accountNumber,
+        source: '9psb',
       },
     };
   }
