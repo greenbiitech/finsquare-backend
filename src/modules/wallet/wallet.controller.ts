@@ -262,7 +262,7 @@ export class WalletController {
             const wallet = await this.walletService.findWalletByAccountNo(webhookDto.accountnumber);
 
             if (wallet) {
-              // Credit the wallet
+              // Credit the wallet (also sends push notification and email)
               await this.walletService.creditWallet(
                 wallet.id,
                 parseFloat(webhookDto.amount),

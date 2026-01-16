@@ -930,17 +930,20 @@ export class WalletService {
 
     // Send notification (non-blocking)
     if (result.user) {
+      this.logger.log(`Sending credit notifications to user: ${result.user.id}, email: ${result.user.email}`);
+
       this.notificationsService
         .sendToUser(
           result.user.id,
-          'Wallet Credited!',
-          `Your wallet has been credited with ₦${amount.toLocaleString()}`,
+          'Wallet Credited 💰',
+          `₦${amount.toLocaleString('en-NG', { minimumFractionDigits: 2 })} has been added to your wallet`,
           {
             type: 'WALLET_CREDIT',
             amount: amount.toString(),
             reference,
           },
         )
+        .then(() => this.logger.log('Push notification sent successfully'))
         .catch((err) => this.logger.error('Failed to send credit notification', err));
 
       // Send email notification
@@ -952,7 +955,10 @@ export class WalletService {
           reference,
           result.wallet.balance,
         )
+        .then(() => this.logger.log('Credit email sent successfully'))
         .catch((err) => this.logger.error('Failed to send credit email', err));
+    } else {
+      this.logger.warn(`No user found for wallet, skipping notifications. WalletId: ${walletId}`);
     }
 
     return result;
