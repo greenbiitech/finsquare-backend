@@ -821,4 +821,140 @@ export class WalletService {
       throw new InternalServerErrorException('Failed to fetch wallet balance');
     }
   }
+
+  // ============================================
+  // WALLET FUNDING (WEBHOOK SUPPORT)
+  // ============================================
+
+  /**
+   * Find a wallet by its 9PSB account number
+   */
+  async findWalletByAccountNo(accountNumber: string) {
+    return this.prisma.wallet.findFirst({
+      where: {
+        OR: [
+          { externalWalletId: accountNumber },
+          {
+            externalWalletDetails: {
+              path: ['accountNumber'],
+              equals: accountNumber,
+            },
+          },
+        ],
+        isDeleted: false,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            fullName: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Find a transaction by its reference
+   */
+  async findTransactionByReference(reference: string) {
+    return this.prisma.transaction.findUnique({
+      where: { reference },
+    });
+  }
+
+  /**
+   * Credit a wallet when money is received from 9PSB
+   */
+  async creditWallet(
+    walletId: string,
+    amount: number,
+    narration: string,
+    transactionType: string,
+    reference: string,
+    webhookDetails: any,
+  ) {
+    this.logger.log(`Crediting wallet ${walletId} with ${amount} (ref: ${reference})`);
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Get current wallet
+      const wallet = await tx.wallet.findUnique({
+        where: { id: walletId },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              fullName: true,
+            },
+          },
+        },
+      });
+
+      if (!wallet) {
+        throw new BadRequestException('Wallet not found');
+      }
+
+      // Update wallet balance
+      const updatedWallet = await tx.wallet.update({
+        where: { id: walletId },
+        data: {
+          balance: { increment: amount },
+          totalDeposit: { increment: amount },
+        },
+      });
+
+      // Create transaction record
+      const transaction = await tx.transaction.create({
+        data: {
+          userId: wallet.userId,
+          walletId,
+          amount,
+          transactionType: 'CREDIT',
+          reason: narration,
+          reference,
+          externalRef: webhookDetails.nipsessionid,
+          status: 'SUCCESS',
+          details: webhookDetails,
+        },
+      });
+
+      return { wallet: updatedWallet, transaction, user: wallet.user };
+    });
+
+    this.logger.log(`Wallet credited successfully: new balance = ${result.wallet.balance}`);
+
+    // Send notification (non-blocking)
+    if (result.user) {
+      this.notificationsService
+        .sendToUser(
+          result.user.id,
+          'Wallet Credited!',
+          `Your wallet has been credited with ₦${amount.toLocaleString()}`,
+          {
+            type: 'WALLET_CREDIT',
+            amount: amount.toString(),
+            reference,
+          },
+        )
+        .catch((err) => this.logger.error('Failed to send credit notification', err));
+
+      // Send email notification
+      this.zeptomailService
+        .sendWalletCredited(
+          result.user.email,
+          result.user.firstName || 'Customer',
+          amount,
+          reference,
+          result.wallet.balance,
+        )
+        .catch((err) => this.logger.error('Failed to send credit email', err));
+    }
+
+    return result;
+  }
 }

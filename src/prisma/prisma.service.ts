@@ -54,11 +54,84 @@ export class PrismaService
 
   async onModuleInit() {
     // Don't call $connect() - pool handles connections with proper SSL
+    await this.runMigrations();
     await this.seedDefaults();
   }
 
   async onModuleDestroy() {
     await this.$disconnect();
+  }
+
+  /**
+   * Runs database migrations on app startup (idempotent - safe to run multiple times)
+   */
+  private async runMigrations() {
+    try {
+      this.logger.log('Running database migrations...');
+
+      // Create TransactionType enum if not exists
+      await this.$executeRawUnsafe(`
+        DO $$ BEGIN
+          CREATE TYPE "TransactionType" AS ENUM ('CREDIT', 'DEBIT', 'TRANSFER', 'DEPOSIT', 'WITHDRAWAL');
+        EXCEPTION
+          WHEN duplicate_object THEN null;
+        END $$;
+      `);
+
+      // Create TransactionStatus enum if not exists
+      await this.$executeRawUnsafe(`
+        DO $$ BEGIN
+          CREATE TYPE "TransactionStatus" AS ENUM ('PENDING', 'SUCCESS', 'FAILED');
+        EXCEPTION
+          WHEN duplicate_object THEN null;
+        END $$;
+      `);
+
+      // Create transactions table if not exists
+      await this.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "transactions" (
+          "id" TEXT NOT NULL,
+          "userId" TEXT NOT NULL,
+          "walletId" TEXT NOT NULL,
+          "amount" DOUBLE PRECISION NOT NULL,
+          "transactionType" "TransactionType" NOT NULL,
+          "reason" TEXT,
+          "reference" TEXT NOT NULL,
+          "externalRef" TEXT,
+          "status" "TransactionStatus" NOT NULL DEFAULT 'PENDING',
+          "details" JSONB,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "transactions_pkey" PRIMARY KEY ("id")
+        );
+      `);
+
+      // Create webhook_logs table if not exists
+      await this.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "webhook_logs" (
+          "id" TEXT NOT NULL,
+          "source" TEXT NOT NULL,
+          "rawPayload" JSONB NOT NULL,
+          "status" TEXT NOT NULL,
+          "message" TEXT,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "webhook_logs_pkey" PRIMARY KEY ("id")
+        );
+      `);
+
+      // Create indexes (idempotent)
+      await this.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "transactions_reference_key" ON "transactions"("reference");`);
+      await this.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "transactions_userId_idx" ON "transactions"("userId");`);
+      await this.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "transactions_walletId_idx" ON "transactions"("walletId");`);
+      await this.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "transactions_reference_idx" ON "transactions"("reference");`);
+      await this.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "webhook_logs_source_idx" ON "webhook_logs"("source");`);
+      await this.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "webhook_logs_status_idx" ON "webhook_logs"("status");`);
+
+      this.logger.log('Database migrations completed!');
+    } catch (error) {
+      this.logger.error('Failed to run migrations:', error);
+      // Don't throw - app should still start even if migrations fail
+    }
   }
 
   /**

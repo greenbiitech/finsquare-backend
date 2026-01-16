@@ -87,6 +87,8 @@ export class NotificationsService implements OnModuleInit {
     body: string,
     data?: Record<string, string>,
   ): Promise<boolean> {
+    this.logger.log(`Sending notification to user ${userId}: "${title}"`);
+
     if (!this.firebaseApp) {
       this.logger.warn('Firebase not initialized. Cannot send notification.');
       return false;
@@ -102,6 +104,7 @@ export class NotificationsService implements OnModuleInit {
       return false;
     }
 
+    this.logger.log(`Found FCM token for user ${userId}, platform: ${user.devicePlatform}`);
     return this.sendNotification(user.fcmToken, title, body, data);
   }
 

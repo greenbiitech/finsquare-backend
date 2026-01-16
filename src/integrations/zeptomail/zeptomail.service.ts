@@ -603,4 +603,117 @@ export class ZeptomailService {
     `;
     return this.sendEmail(to, subject, htmlBody);
   }
+
+  async sendWalletCredited(
+    to: string,
+    userName: string,
+    amount: number,
+    reference: string,
+    newBalance: number,
+  ): Promise<boolean> {
+    const subject = 'Wallet Credited - FinSquare';
+    const formattedAmount = amount.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedBalance = newBalance.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const htmlBody = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Wallet Credited</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+          }
+          .container {
+            max-width: 600px;
+            margin: 40px auto;
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          }
+          .header {
+            text-align: center;
+            color: #333333;
+          }
+          .amount-box {
+            background-color: #e8f5e9;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+          }
+          .amount {
+            font-size: 32px;
+            font-weight: bold;
+            color: #2e7d32;
+          }
+          .details {
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+          }
+          .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+          }
+          .detail-row:last-child {
+            border-bottom: none;
+          }
+          .label {
+            color: #888;
+            font-size: 14px;
+          }
+          .value {
+            color: #333;
+            font-size: 14px;
+            font-weight: 500;
+          }
+          .footer {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #aaaaaa;
+            text-align: center;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h2 class="header">Wallet Credited</h2>
+          <p style="text-align: center; color: #555;">Hello ${userName},</p>
+          <p style="text-align: center; color: #555;">Your wallet has been credited successfully.</p>
+          <div class="amount-box">
+            <div style="color: #888; font-size: 14px;">Amount Credited</div>
+            <div class="amount">₦${formattedAmount}</div>
+          </div>
+          <div class="details">
+            <div class="detail-row">
+              <span class="label">Reference</span>
+              <span class="value">${reference}</span>
+            </div>
+            <div class="detail-row">
+              <span class="label">New Balance</span>
+              <span class="value">₦${formattedBalance}</span>
+            </div>
+            <div class="detail-row">
+              <span class="label">Date</span>
+              <span class="value">${new Date().toLocaleString('en-NG')}</span>
+            </div>
+          </div>
+          <div class="footer">
+            This is an automated message from FinSquare. Please do not reply to this email.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    return this.sendEmail(to, subject, htmlBody);
+  }
 }

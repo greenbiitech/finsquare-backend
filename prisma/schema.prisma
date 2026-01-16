@@ -228,6 +228,39 @@ model community_wallets {
   community             Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
 }
 
+model Transaction {
+  id              String            @id @default(uuid())
+  userId          String
+  walletId        String
+  amount          Float
+  transactionType TransactionType
+  reason          String?
+  reference       String            @unique
+  externalRef     String?
+  status          TransactionStatus @default(PENDING)
+  details         Json?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([userId])
+  @@index([walletId])
+  @@index([reference])
+  @@map("transactions")
+}
+
+model WebhookLog {
+  id         String   @id @default(uuid())
+  source     String
+  rawPayload Json
+  status     String
+  message    String?
+  createdAt  DateTime @default(now())
+
+  @@index([source])
+  @@index([status])
+  @@map("webhook_logs")
+}
+
 // ============================================
 // ENUMS
 // ============================================
@@ -269,4 +302,18 @@ enum JoinRequestStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+  TRANSFER
+  DEPOSIT
+  WITHDRAWAL
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
 }

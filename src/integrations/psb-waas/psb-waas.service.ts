@@ -200,6 +200,36 @@ export class PsbWaasService {
     }
   }
 
+  /**
+   * Requery a transaction notification from 9PSB
+   * Used to verify webhook transactions
+   */
+  async requeryNotification(accountNumber: string, sessionId: string): Promise<{ status: string; data?: any }> {
+    const config = this.getConfig();
+    const token = await this.authenticate();
+
+    try {
+      this.logger.log(`Requerying notification for account: ${accountNumber}, session: ${sessionId}`);
+
+      const response = await axios.post(
+        `${config.apiUrl}/inflow/requery`,
+        { accountNumber, sessionID: sessionId },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        },
+      );
+
+      this.logger.log(`Requery response: ${JSON.stringify(response.data)}`);
+      return response.data;
+    } catch (error) {
+      this.logger.error('Requery notification failed:', error);
+      return { status: 'FAILED' };
+    }
+  }
+
   private handleError(error: unknown, method: string): never {
     // Re-throw if it's already our error format
     if ((error as any).psbError) {
