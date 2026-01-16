@@ -70,6 +70,18 @@ export class PsbWaasService {
 
     const config = this.getConfig();
 
+    // Debug: Log config (without secrets)
+    this.logger.log(`9PSB Config: authUrl=${config.authUrl}, apiUrl=${config.apiUrl}, username=${config.username ? '***set***' : 'NOT SET'}`);
+
+    if (!config.authUrl || !config.username || !config.password) {
+      this.logger.error('9PSB credentials not configured!');
+      throw {
+        statusCode: 500,
+        message: '9PSB credentials not configured',
+        psbError: true,
+      };
+    }
+
     try {
       this.logger.log('Authenticating with 9PSB WAAS...');
 
@@ -192,6 +204,9 @@ export class PsbWaasService {
     if ((error as any).psbError) {
       throw error;
     }
+
+    // Log the full error for debugging
+    this.logger.error(`9PSB ${method} error:`, error);
 
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError<any>;
