@@ -35,22 +35,17 @@ export class PrismaService
       } else {
         poolConfig.ssl = { rejectUnauthorized: false };
 
-        // Ensure connection string also reflects this to avoid ambiguity for the driver
-        if (!connectionString.includes('sslmode=')) {
+        // Force sslmode=no-verify in connection string
+        // This overrides any existing 'sslmode=require' (which might force verification)
+        if (connectionString.includes('sslmode=')) {
+          connectionString = connectionString.replace(/sslmode=[^&]+/, 'sslmode=no-verify');
+        } else {
           const separator = connectionString.includes('?') ? '&' : '?';
           connectionString += `${separator}sslmode=no-verify`;
-          poolConfig.connectionString = connectionString;
         }
+        poolConfig.connectionString = connectionString;
       }
     }
-
-    // DEBUG: Log the final SSL config to understand why it's failing
-    const maskedConnectionString = connectionString.replace(/:([^:@]+)@/, ':***@');
-    console.log(`[PrismaService] Connecting with config:`, {
-      useSSL,
-      sslConfig: poolConfig.ssl,
-      connectionString: maskedConnectionString,
-    });
 
     const pool = new pg.Pool(poolConfig);
     const adapter = new PrismaPg(pool);
