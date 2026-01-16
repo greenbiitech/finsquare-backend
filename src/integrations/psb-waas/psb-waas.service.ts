@@ -46,15 +46,16 @@ export class PsbWaasService {
   constructor(private configService: ConfigService) {}
 
   private getConfig() {
+    // Use same env var names as old Greencard codebase for compatibility
+    const apiUrl = this.configService.get<string>('FINANCE_9PSB_WALLET_API_URL');
     return {
-      apiUrl: this.configService.get<string>('PSB_WALLET_API_URL'),
-      authUrl: this.configService.get<string>('PSB_WALLET_AUTH_URL'),
-      username: this.configService.get<string>('PSB_WALLET_USERNAME'),
-      password: this.configService.get<string>('PSB_WALLET_PASSWORD'),
-      clientId: this.configService.get<string>('PSB_WALLET_CLIENT_ID'),
-      clientSecret: this.configService.get<string>('PSB_WALLET_CLIENT_SECRET'),
-      basicAuthUsername: this.configService.get<string>('PSB_BASIC_AUTH_USERNAME'),
-      basicAuthPassword: this.configService.get<string>('PSB_BASIC_AUTH_PASSWORD'),
+      apiUrl,
+      // Auth URL is base URL + /authenticate (same as old implementation)
+      authUrl: apiUrl ? `${apiUrl}/authenticate` : undefined,
+      username: this.configService.get<string>('FINANCE_9PSB_WALLET_USERNAME'),
+      password: this.configService.get<string>('FINANCE_9PSB_WALLET_PASSWORD'),
+      clientId: this.configService.get<string>('FINANCE_9PSB_WALLET_CLIENT_ID'),
+      clientSecret: this.configService.get<string>('FINANCE_9PSB_WALLET_CLIENT_SECRET'),
     };
   }
 
