@@ -6,8 +6,7 @@ import pg from 'pg';
 @Injectable()
 export class PrismaService
   extends PrismaClient
-  implements OnModuleInit, OnModuleDestroy
-{
+  implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
 
   constructor() {
@@ -44,6 +43,14 @@ export class PrismaService
         }
       }
     }
+
+    // DEBUG: Log the final SSL config to understand why it's failing
+    const maskedConnectionString = connectionString.replace(/:([^:@]+)@/, ':***@');
+    console.log(`[PrismaService] Connecting with config:`, {
+      useSSL,
+      sslConfig: poolConfig.ssl,
+      connectionString: maskedConnectionString,
+    });
 
     const pool = new pg.Pool(poolConfig);
     const adapter = new PrismaPg(pool);
