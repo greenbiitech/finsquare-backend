@@ -3,8 +3,13 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 
+const connectionString = process.env.DATABASE_URL || '';
+const isLocalhost = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
+
 const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString,
+  // Enable SSL for non-localhost connections, accept self-signed certs
+  ssl: isLocalhost ? false : { rejectUnauthorized: false },
 });
 
 const adapter = new PrismaPg(pool);

@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
@@ -8,9 +8,16 @@ export class PrismaService
   extends PrismaClient
   implements OnModuleInit, OnModuleDestroy
 {
+  private readonly logger = new Logger(PrismaService.name);
+
   constructor() {
+    const connectionString = process.env.DATABASE_URL || '';
+    const isLocalhost = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
+
     const pool = new pg.Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString,
+      // Enable SSL for non-localhost connections, accept self-signed certs
+      ssl: isLocalhost ? false : { rejectUnauthorized: false },
     });
     const adapter = new PrismaPg(pool);
     super({ adapter });
@@ -18,9 +25,66 @@ export class PrismaService
 
   async onModuleInit() {
     await this.$connect();
+    await this.seedDefaults();
   }
 
   async onModuleDestroy() {
     await this.$disconnect();
+  }
+
+  /**
+   * Seeds default data on app startup (idempotent - safe to run multiple times)
+   */
+  private async seedDefaults() {
+    try {
+      // Check if default community already exists
+      const existingCommunity = await this.community.findFirst({
+        where: { isDefault: true },
+      });
+
+      if (existingCommunity) {
+        this.logger.log(`Default community exists: ${existingCommunity.name}`);
+        return;
+      }
+
+      this.logger.log('Seeding default data...');
+
+      // Create system user for default community
+      const systemUser = await this.user.upsert({
+        where: { email: 'system@finsquare.app' },
+        update: {},
+        create: {
+          id: 'finsquare-system-user',
+          email: 'system@finsquare.app',
+          phoneNumber: '+0000000000',
+          password: 'SYSTEM_USER_NO_LOGIN',
+          firstName: 'FinSquare',
+          lastName: 'System',
+          fullName: 'FinSquare System',
+          isVerified: true,
+        },
+      });
+
+      this.logger.log(`System user ready: ${systemUser.email}`);
+
+      // Create FinSquare Community (default community)
+      const finsquareCommunity = await this.community.upsert({
+        where: { id: 'finsquare-default-community' },
+        update: {},
+        create: {
+          id: 'finsquare-default-community',
+          name: 'FinSquare Community',
+          description: 'The default FinSquare community for individual members',
+          isDefault: true,
+          createdById: systemUser.id,
+        },
+      });
+
+      this.logger.log(`Default community created: ${finsquareCommunity.name}`);
+      this.logger.log('Seeding completed!');
+    } catch (error) {
+      this.logger.error('Failed to seed defaults:', error);
+      // Don't throw - app should still start even if seeding fails
+    }
   }
 }
