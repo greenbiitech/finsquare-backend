@@ -201,6 +201,49 @@ export class PsbWaasService {
   }
 
   /**
+   * Get wallet transaction history from 9PSB
+   * @param accountNumber - Customer's wallet account number
+   * @param fromDate - Start date (format: "dd/MM/yyyy" or "yyyy-MM-dd")
+   * @param toDate - End date (format: "dd/MM/yyyy" or "yyyy-MM-dd")
+   * @param numberOfItems - Number of transactions to fetch
+   */
+  async getTransactionHistory(
+    accountNumber: string,
+    fromDate: string,
+    toDate: string,
+    numberOfItems: number = 50,
+  ): Promise<{ status: string; message: string; data?: any[] }> {
+    const config = this.getConfig();
+    const token = await this.authenticate();
+
+    try {
+      this.logger.log(`Fetching transaction history for account: ${accountNumber}, from: ${fromDate}, to: ${toDate}`);
+
+      const response = await axios.post(
+        `${config.apiUrl}/wallet_transactions`,
+        {
+          accountNumber,
+          fromDate,
+          toDate,
+          numberOfItems: numberOfItems.toString(),
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        },
+      );
+
+      this.logger.log(`Transaction history response status: ${response.data?.status}`);
+      return response.data;
+    } catch (error) {
+      this.logger.error('Failed to fetch transaction history:', error);
+      return { status: 'FAILED', message: 'Failed to fetch transaction history' };
+    }
+  }
+
+  /**
    * Requery a transaction notification from 9PSB
    * Used to verify webhook transactions
    */

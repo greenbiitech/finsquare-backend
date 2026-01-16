@@ -823,6 +823,125 @@ export class WalletService {
   }
 
   // ============================================
+  // TRANSACTION HISTORY
+  // ============================================
+
+  /**
+   * Get transaction history from 9PSB
+   * @param userId - User's ID
+   * @param fromDate - Start date (optional, defaults to 30 days ago)
+   * @param toDate - End date (optional, defaults to today)
+   * @param limit - Number of transactions to fetch
+   */
+  async getTransactionHistory(
+    userId: string,
+    fromDate?: string,
+    toDate?: string,
+    limit: number = 50,
+  ) {
+    this.logger.log(`Fetching transaction history for user: ${userId}`);
+
+    // Get user's wallet
+    const wallet = await this.prisma.wallet.findFirst({
+      where: {
+        userId,
+        walletType: 'MAIN',
+        isDeleted: false,
+      },
+    });
+
+    if (!wallet) {
+      throw new BadRequestException('Wallet not found');
+    }
+
+    // Get account number from wallet details
+    const walletDetails = wallet.externalWalletDetails as any;
+    const accountNumber = walletDetails?.accountNumber;
+
+    if (!accountNumber) {
+      throw new BadRequestException('Wallet account number not found');
+    }
+
+    // Default date range: last 30 days
+    const today = new Date();
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // Format dates as "dd/MM/yyyy" for 9PSB API
+    const formatDate = (date: Date) => {
+      const day = date.getDate().toString().padStart(2, '0');
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
+    };
+
+    const from = fromDate || formatDate(thirtyDaysAgo);
+    const to = toDate || formatDate(today);
+
+    // Fetch from 9PSB
+    const response = await this.psbWaasService.getTransactionHistory(
+      accountNumber,
+      from,
+      to,
+      limit,
+    );
+
+    if (response.status !== 'SUCCESS') {
+      this.logger.warn(`Failed to fetch transaction history: ${response.message}`);
+      // Return local transactions as fallback
+      return this.getLocalTransactionHistory(userId, limit);
+    }
+
+    return {
+      success: true,
+      data: {
+        transactions: response.data || [],
+        fromDate: from,
+        toDate: to,
+        accountNumber,
+      },
+    };
+  }
+
+  /**
+   * Get transaction history from local database (fallback)
+   */
+  private async getLocalTransactionHistory(userId: string, limit: number = 50) {
+    const transactions = await this.prisma.transaction.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        amount: true,
+        transactionType: true,
+        reason: true,
+        reference: true,
+        status: true,
+        createdAt: true,
+        details: true,
+      },
+    });
+
+    return {
+      success: true,
+      data: {
+        transactions: transactions.map((tx) => ({
+          id: tx.id,
+          amount: tx.amount,
+          type: tx.transactionType,
+          narration: tx.reason,
+          reference: tx.reference,
+          status: tx.status,
+          date: tx.createdAt,
+          details: tx.details,
+        })),
+        source: 'local',
+      },
+    };
+  }
+
+  // ============================================
   // WALLET FUNDING (WEBHOOK SUPPORT)
   // ============================================
 

@@ -194,6 +194,31 @@ export class WalletController {
   }
 
   // ============================================
+  // TRANSACTION HISTORY
+  // ============================================
+
+  @Get('transactions')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get wallet transaction history',
+    description: 'Fetches transaction history from 9PSB WAAS',
+  })
+  async getTransactionHistory(
+    @CurrentUser() user: { userId: string },
+    @Query('fromDate') fromDate?: string,
+    @Query('toDate') toDate?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.walletService.getTransactionHistory(
+      user.userId,
+      fromDate,
+      toDate,
+      limit ? parseInt(limit, 10) : 50,
+    );
+  }
+
+  // ============================================
   // 9PSB WEBHOOK (PUBLIC - Basic Auth)
   // ============================================
 
