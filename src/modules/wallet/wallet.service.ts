@@ -867,12 +867,12 @@ export class WalletService {
     const thirtyDaysAgo = new Date(today);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    // Format dates as "dd/MM/yyyy" for 9PSB API
+    // Format dates as "yyyy-MM-dd" for 9PSB API (ISO format)
     const formatDate = (date: Date) => {
       const day = date.getDate().toString().padStart(2, '0');
       const month = (date.getMonth() + 1).toString().padStart(2, '0');
       const year = date.getFullYear();
-      return `${day}/${month}/${year}`;
+      return `${year}-${month}-${day}`;
     };
 
     const from = fromDate || formatDate(thirtyDaysAgo);
