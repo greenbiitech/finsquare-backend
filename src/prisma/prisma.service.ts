@@ -28,7 +28,21 @@ export class PrismaService
     };
 
     if (useSSL) {
-      poolConfig.ssl = { rejectUnauthorized: false };
+      if (process.env.DATABASE_CA_CERT) {
+        poolConfig.ssl = {
+          rejectUnauthorized: true,
+          ca: process.env.DATABASE_CA_CERT,
+        };
+      } else {
+        poolConfig.ssl = { rejectUnauthorized: false };
+
+        // Ensure connection string also reflects this to avoid ambiguity for the driver
+        if (!connectionString.includes('sslmode=')) {
+          const separator = connectionString.includes('?') ? '&' : '?';
+          connectionString += `${separator}sslmode=no-verify`;
+          poolConfig.connectionString = connectionString;
+        }
+      }
     }
 
     const pool = new pg.Pool(poolConfig);
