@@ -12,12 +12,24 @@ export class PrismaService
 
   constructor() {
     const connectionString = process.env.DATABASE_URL || '';
+
+    // Determine SSL config: check DB_SSL env var, or auto-detect based on hostname
     const isLocalhost = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
+    const forceSSL = process.env.DB_SSL === 'true';
+    const disableSSL = process.env.DB_SSL === 'false';
+
+    let sslConfig: boolean | { rejectUnauthorized: boolean } = false;
+    if (disableSSL) {
+      sslConfig = false;
+    } else if (forceSSL || !isLocalhost) {
+      sslConfig = { rejectUnauthorized: false };
+    }
+
+    this.logger.log(`DB SSL config: ${JSON.stringify(sslConfig)}, isLocalhost: ${isLocalhost}`);
 
     const pool = new pg.Pool({
       connectionString,
-      // Enable SSL for non-localhost connections, accept self-signed certs
-      ssl: isLocalhost ? false : { rejectUnauthorized: false },
+      ssl: sslConfig,
     });
     const adapter = new PrismaPg(pool);
     super({ adapter });
