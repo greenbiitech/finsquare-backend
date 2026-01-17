@@ -1162,7 +1162,9 @@ export class WalletService {
         },
       },
       merchant: {
-        merchant: 'FinSquare', // Or configured merchant code
+        isFee: false,
+        merchantFeeAccount: '0000000000',
+        merchantFeeAmount: '0',
       },
       transactionType: 'OTHER_BANKS',
       narration: dto.narration,

@@ -61,7 +61,9 @@ export interface PsbTransferRequest {
     };
   };
   merchant: {
-    merchant: string;
+    isFee: boolean;
+    merchantFeeAccount: string;
+    merchantFeeAmount: string;
   };
   transactionType: string; // 'OTHER_BANKS'
   narration: string;
