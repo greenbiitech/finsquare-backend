@@ -20,13 +20,13 @@ import { PsbWebhookDto } from './dto/psb-webhook.dto';
 /**
  * Backward-compatible webhook controller for 9PSB
  *
- * The old Greencard codebase had the webhook at /auth/9psb-webhook
- * This controller provides the same endpoint for backward compatibility
- * so we don't need to update 9PSB dashboard configuration.
+ * The old Greencard codebase had the webhook at /api/auth/9psb-webhook
+ * AND a typo version at /api/auth/9psb-webook (missing 'h')
+ * This controller provides both endpoints for backward compatibility.
  */
 @ApiTags('9PSB Webhook (Legacy)')
 @ApiExcludeController() // Hide from Swagger - internal use only
-@Controller('api/auth') // Old codebase had global prefix 'api', so webhook was at /api/auth/9psb-webhook
+@Controller('api/auth')
 export class PsbWebhookController {
   private readonly logger = new Logger(PsbWebhookController.name);
 
@@ -39,15 +39,41 @@ export class PsbWebhookController {
 
   @Post('9psb-webhook')
   @ApiOperation({
-    summary: '9PSB Inflow Webhook (Legacy URL)',
-    description: 'Backward-compatible endpoint at /auth/9psb-webhook for 9PSB notifications',
+    summary: '9PSB Inflow Webhook',
+    description: 'Endpoint at /api/auth/9psb-webhook for 9PSB notifications',
   })
   async handle9psbWebhook(
     @Req() req: Request,
     @Body() webhookDto: PsbWebhookDto,
     @Query('event') event: string,
   ) {
-    this.logger.log('========== 9PSB WEBHOOK (LEGACY /auth/) START ==========');
+    return this.processWebhook(req, webhookDto, event, 'webhook');
+  }
+
+  // Old code had a TYPO: "9psb-webook" (missing 'h') - 9PSB might be configured to call this
+  @Post('9psb-webook')
+  @ApiOperation({
+    summary: '9PSB Inflow Webhook (Typo URL)',
+    description: 'Endpoint at /api/auth/9psb-webook (typo) for 9PSB notifications',
+  })
+  async handle9psbWebook(
+    @Req() req: Request,
+    @Body() webhookDto: PsbWebhookDto,
+    @Query('event') event: string,
+  ) {
+    return this.processWebhook(req, webhookDto, event, 'webook-typo');
+  }
+
+  /**
+   * Shared webhook processing logic
+   */
+  private async processWebhook(
+    req: Request,
+    webhookDto: PsbWebhookDto,
+    event: string,
+    source: string,
+  ) {
+    this.logger.log(`========== 9PSB WEBHOOK (${source}) START ==========`);
     this.logger.log(`Event: ${event}`);
     this.logger.log(`Webhook Payload: ${JSON.stringify(webhookDto)}`);
 
@@ -55,7 +81,7 @@ export class PsbWebhookController {
     try {
       await this.prisma.webhookLog.create({
         data: {
-          source: '9PSB-LEGACY',
+          source: `9PSB-${source}`,
           rawPayload: { event, ...webhookDto },
           status: 'RECEIVED',
           message: `Account: ${webhookDto.accountnumber}, Amount: ${webhookDto.amount}, Ref: ${webhookDto.transactionref}`,
@@ -151,7 +177,7 @@ export class PsbWebhookController {
               // Log success
               await this.prisma.webhookLog.create({
                 data: {
-                  source: '9PSB-LEGACY',
+                  source: `9PSB-${source}`,
                   rawPayload: { ...webhookDto },
                   status: 'PROCESSED',
                   message: `Wallet funded: ${webhookDto.transactionref}, Amount: ${webhookDto.amount}`,
@@ -161,7 +187,7 @@ export class PsbWebhookController {
               this.logger.error(`WALLET NOT FOUND for account: ${webhookDto.accountnumber}`);
               await this.prisma.webhookLog.create({
                 data: {
-                  source: '9PSB-LEGACY',
+                  source: `9PSB-${source}`,
                   rawPayload: { ...webhookDto },
                   status: 'FAILED',
                   message: `Wallet not found for account: ${webhookDto.accountnumber}`,
@@ -172,7 +198,7 @@ export class PsbWebhookController {
             this.logger.warn(`Requery returned non-success status: ${txStatus.status}`);
             await this.prisma.webhookLog.create({
               data: {
-                source: '9PSB-LEGACY',
+                source: `9PSB-${source}`,
                 rawPayload: { ...webhookDto },
                 status: 'FAILED',
                 message: `Requery failed with status: ${txStatus.status}`,
@@ -186,7 +212,7 @@ export class PsbWebhookController {
         this.logger.warn(`Transaction code is not 00: ${webhookDto.code}`);
         await this.prisma.webhookLog.create({
           data: {
-            source: '9PSB-LEGACY',
+            source: `9PSB-${source}`,
             rawPayload: { ...webhookDto },
             status: 'SKIPPED',
             message: `Non-success code: ${webhookDto.code}`,
@@ -198,7 +224,7 @@ export class PsbWebhookController {
       this.logger.error(error.stack);
       await this.prisma.webhookLog.create({
         data: {
-          source: '9PSB-LEGACY',
+          source: `9PSB-${source}`,
           rawPayload: { ...webhookDto },
           status: 'FAILED',
           message: error.message || 'Unknown error',
@@ -206,7 +232,7 @@ export class PsbWebhookController {
       });
     }
 
-    this.logger.log('========== 9PSB WEBHOOK (LEGACY /auth/) END ==========');
+    this.logger.log(`========== 9PSB WEBHOOK (${source}) END ==========`);
 
     // Always return success to 9PSB
     return {
