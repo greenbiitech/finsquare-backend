@@ -899,64 +899,56 @@ export class WalletService {
 
     this.logger.log(`9PSB transaction history response: status=${response.status}, txCount=${response.data?.length ?? 0}`);
 
-    if (response.status !== 'SUCCESS') {
-      this.logger.warn(`Failed to fetch transaction history from 9PSB: ${response.message}. Falling back to local.`);
-      // Return local transactions as fallback
-      return this.getLocalTransactionHistory(userId, limit);
+    // Lazy Sync: Persist any missing remote transactions to local DB
+    if (response.status === 'SUCCESS' && response.data && response.data.length > 0) {
+      await this.syncRemoteTransactions(userId, wallet.id, response.data);
     }
 
-    // Fetch local history as well to merge
-    const localHistory = await this.getLocalTransactionHistory(userId, limit);
-    const localTransactions = localHistory.data.transactions;
-    const psbTransactions = response.status === 'SUCCESS' ? (response.data || []) : [];
+    // Return merged/updated local history
+    return this.getLocalTransactionHistory(userId, limit);
+  }
 
-    // Merge logic: Start with local, add PSB if not exists (by checking reference/date?)
-    // Simpler approach: If PSB returns 0 items, show local. If PSB returns items, show mixed?
-    // User complaint: "No transaction history". 
-    // Best fix: Combine lists. 9PSB objects and Local objects might have different shapes despite DTO.
-    // We'll prioritize Local for immediate feedback.
+  /**
+   * Sync remote transactions to local DB (Lazy Sync)
+   * Ensures missed webhooks don't result in missing local history
+   */
+  private async syncRemoteTransactions(userId: string, walletId: string, remoteTransactions: any[]) {
+    if (!remoteTransactions || remoteTransactions.length === 0) return;
 
-    // Map PSB transactions to common shape if needed (Validation likely needed here)
-    // For now, let's return Local + PSB.
-    // If PSB came back empty, at least returns local.
+    for (const remoteTx of remoteTransactions) {
+      if (!remoteTx.transactionRef) continue;
 
-    const allTransactions = [...localTransactions];
-
-    // Add PSB transactions if they don't match existing local IDs/References
-    // Note: PSB response structure depends on 9PSB API.
-    // Assuming identical shape to what local history returns or DTO handles it.
-
-    if (psbTransactions.length > 0) {
-      // TODO: Smart merging to avoid duplicates. 
-      // For now, if we have PSB transactions, we might prefer them or append them.
-      // Given complexity, let's just Append PSB transactions that aren't in local (by check).
-      // Since we can't easily check 'same transaction' without ID matching, 
-      // let's just Return BOTH if different sources.
-
-      // Actually, safer to return Local if PSB is empty.
-      // If PSB has data, usually it's the source of truth.
-      // BUT user just did a transaction, PSB might be lagging.
-      // So we MUST show local.
-
-      psbTransactions.forEach((pt: any) => {
-        // Basic duplicate check by reference could improve this
-        const exists = allTransactions.some(lt => lt.reference === pt.transactionRef);
-        if (!exists) {
-          allTransactions.push(pt);
-        }
+      const exists = await this.prisma.transaction.findUnique({
+        where: { reference: remoteTx.transactionRef },
       });
-    }
 
-    return {
-      success: true,
-      data: {
-        transactions: allTransactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
-        fromDate: from,
-        toDate: to,
-        accountNumber,
-        source: 'mixed',
-      },
-    };
+      if (!exists) {
+        this.logger.log(`Syncing missing remote transaction: ${remoteTx.transactionRef}`);
+
+        // Determine type based on 'header' (D/C) or explicit 'type' field
+        let type = remoteTx.header === 'D' ? 'DEBIT' : 'CREDIT';
+        if (remoteTx.transactionType === 'CR') type = 'CREDIT';
+        if (remoteTx.transactionType === 'DR') type = 'DEBIT';
+
+        // Robust parsing of amount
+        const amountStr = remoteTx.amount ? remoteTx.amount.toString() : '0';
+        const amount = parseFloat(amountStr);
+
+        await this.prisma.transaction.create({
+          data: {
+            userId,
+            walletId,
+            amount,
+            transactionType: type === 'DEBIT' ? 'DEBIT' : 'CREDIT',
+            status: 'SUCCESS',
+            reference: remoteTx.transactionRef,
+            reason: remoteTx.narration || remoteTx.description || 'Synced Transaction',
+            createdAt: new Date(remoteTx.transactionDate || new Date()),
+            details: remoteTx,
+          },
+        });
+      }
+    }
   }
 
   /**
@@ -992,7 +984,7 @@ export class WalletService {
           date: tx.createdAt,
           details: tx.details,
         })),
-        source: 'local',
+        source: 'local_synced',
       },
     };
   }
