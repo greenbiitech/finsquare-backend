@@ -47,6 +47,7 @@ export interface PsbTransferRequest {
     currency: string;
     amountpaid: string;
     description: string;
+    country: string;
   };
   customer: {
     account: {

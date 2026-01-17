@@ -1148,6 +1148,7 @@ export class WalletService {
         currency: 'NGN',
         amountpaid: dto.amount.toString(),
         description: dto.narration,
+        country: 'NG',
       },
       customer: {
         account: {
