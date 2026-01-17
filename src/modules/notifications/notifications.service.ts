@@ -12,7 +12,7 @@ export class NotificationsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
-  ) {}
+  ) { }
 
   onModuleInit() {
     this.initializeFirebase();
@@ -33,8 +33,8 @@ export class NotificationsService implements OnModuleInit {
         credential: admin.credential.cert({
           projectId,
           clientEmail,
-          // Replace escaped newlines
-          privateKey: privateKey.replace(/\\n/g, '\n'),
+          // Replace escaped newlines (handle both \n and \\n)
+          privateKey: privateKey.replace(/\\n/g, '\n').replace(/"/g, ''),
         }),
       });
 
