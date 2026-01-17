@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { WalletController } from './wallet.controller';
+import { PsbWebhookController } from './psb-webhook.controller';
 import { WalletService } from './wallet.service';
 import { MonoModule } from '../../integrations/mono/mono.module';
 import { PsbWaasModule } from '../../integrations/psb-waas/psb-waas.module';
@@ -15,7 +16,7 @@ import { ZeptomailModule } from '../../integrations/zeptomail/zeptomail.module';
     NotificationsModule,
     ZeptomailModule,
   ],
-  controllers: [WalletController],
+  controllers: [WalletController, PsbWebhookController],
   providers: [WalletService],
   exports: [WalletService],
 })
