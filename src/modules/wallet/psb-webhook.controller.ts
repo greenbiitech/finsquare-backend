@@ -26,7 +26,7 @@ import { PsbWebhookDto } from './dto/psb-webhook.dto';
  */
 @ApiTags('9PSB Webhook (Legacy)')
 @ApiExcludeController() // Hide from Swagger - internal use only
-@Controller('auth')
+@Controller('api/auth') // Old codebase had global prefix 'api', so webhook was at /api/auth/9psb-webhook
 export class PsbWebhookController {
   private readonly logger = new Logger(PsbWebhookController.name);
 
