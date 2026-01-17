@@ -37,13 +37,54 @@ export interface PsbWalletResponse {
   } | null;
 }
 
+export interface PsbTransferRequest {
+  transaction: {
+    reference: string;
+  };
+  order: {
+    amount: string;
+    status: string;
+    currency: string;
+    amountpaid: string;
+    description: string;
+  };
+  customer: {
+    account: {
+      number: string; // Destination account number
+      bank: string; // Destination bank code
+      senderbankname: string;
+      type: string; // 'STATIC' or 'DYNAMIC'
+      senderaccountnumber: string;
+      sendername: string;
+      name: string; // Destination account name
+    };
+  };
+  merchant: {
+    merchant: string;
+  };
+  transactionType: string; // 'OTHER_BANKS'
+  narration: string;
+}
+
+export interface PsbDebitCreditRequest {
+  accountNo: string;
+  totalAmount: string;
+  transactionId: string;
+  narration: string;
+  merchant: {
+    isFee: boolean;
+    merchantFeeAccount?: string;
+    merchantFeeAmount?: string;
+  };
+}
+
 @Injectable()
 export class PsbWaasService {
   private readonly logger = new Logger(PsbWaasService.name);
   private accessToken: string | null = null;
   private tokenExpiresAt: number = 0;
 
-  constructor(private configService: ConfigService) {}
+  constructor(private configService: ConfigService) { }
 
   private getConfig() {
     // Use same env var names as old Greencard codebase for compatibility
@@ -139,7 +180,7 @@ export class PsbWaasService {
       if (response.data.status !== 'SUCCESS') {
         // Check if wallet already exists - 9PSB returns the existing wallet details
         const isWalletExists = response.data.message?.toLowerCase().includes('already exists') ||
-                               response.data.data?.responseCode === '42';
+          response.data.data?.responseCode === '42';
 
         if (isWalletExists && response.data.data?.accountNumber) {
           this.logger.log(`Wallet already exists for user, using existing: ${response.data.data.accountNumber}`);
@@ -250,6 +291,149 @@ export class PsbWaasService {
   }
 
   /**
+   * Transfer funds to other bank
+   */
+  async transferToOtherBank(request: PsbTransferRequest): Promise<PsbWalletResponse> {
+    const config = this.getConfig();
+    const token = await this.authenticate();
+
+    try {
+      this.logger.log(`Initiating transfer to other bank: ${request.customer.account.number} (${request.customer.account.bank})`);
+
+      const response = await axios.post<PsbWalletResponse>(
+        `${config.apiUrl}/wallet_other_banks`,
+        request,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        },
+      );
+
+      this.logger.log(`Transfer response: ${JSON.stringify(response.data)}`);
+      return response.data;
+    } catch (error) {
+      this.handleError(error, 'transferToOtherBank');
+    }
+  }
+
+  /**
+   * Resolve generic bank account
+   */
+  async resolveAccount(accountNumber: string, bankCode: string): Promise<PsbWalletResponse> {
+    const config = this.getConfig();
+    const token = await this.authenticate();
+
+    try {
+      this.logger.log(`Resolving account: ${accountNumber} at bank: ${bankCode}`);
+
+      const response = await axios.post<PsbWalletResponse>(
+        `${config.apiUrl}/other_banks_enquiry`,
+        {
+          customer: {
+            account: {
+              number: accountNumber,
+              bank: bankCode,
+            },
+          },
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        },
+      );
+
+      this.logger.log(`Account resolution response: ${JSON.stringify(response.data)}`);
+      return response.data;
+    } catch (error) {
+      this.handleError(error, 'resolveAccount');
+    }
+  }
+
+  /**
+   * Get list of banks
+   */
+  async getBankList(): Promise<{ status: string; message: string; data?: any[] }> {
+    const config = this.getConfig();
+    const token = await this.authenticate();
+
+    try {
+      this.logger.log('Fetching bank list');
+
+      const response = await axios.get(
+        `${config.apiUrl}/get_banks`,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        },
+      );
+
+      return response.data;
+    } catch (error) {
+      this.handleError(error, 'getBankList');
+    }
+  }
+
+  /**
+   * Debit Wallet (Internal/Float)
+   */
+  async debitWallet(request: PsbDebitCreditRequest): Promise<PsbWalletResponse> {
+    const config = this.getConfig();
+    const token = await this.authenticate();
+
+    try {
+      this.logger.log(`Debiting wallet: ${request.accountNo}, amount: ${request.totalAmount}`);
+
+      const response = await axios.post<PsbWalletResponse>(
+        `${config.apiUrl}/debit/transfer`,
+        request,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        },
+      );
+
+      return response.data;
+    } catch (error) {
+      this.handleError(error, 'debitWallet');
+    }
+  }
+
+  /**
+   * Credit Wallet (Internal/Float)
+   */
+  async creditWallet(request: PsbDebitCreditRequest): Promise<PsbWalletResponse> {
+    const config = this.getConfig();
+    const token = await this.authenticate();
+
+    try {
+      this.logger.log(`Crediting wallet: ${request.accountNo}, amount: ${request.totalAmount}`);
+
+      const response = await axios.post<PsbWalletResponse>(
+        `${config.apiUrl}/credit/transfer`,
+        request,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        },
+      );
+
+      return response.data;
+    } catch (error) {
+      this.handleError(error, 'creditWallet');
+    }
+  }
+
+  /**
    * Requery a transaction notification from 9PSB
    * Used to verify webhook transactions
    */
@@ -300,7 +484,7 @@ export class PsbWaasService {
       // Special handling for "wallet already exists" in createWallet
       if (method === 'createWallet' && responseData) {
         const isWalletExists = responseData.message?.toLowerCase().includes('already exists') ||
-                               responseData.data?.responseCode === '42';
+          responseData.data?.responseCode === '42';
 
         if (isWalletExists && responseData.data?.accountNumber) {
           this.logger.log(`Wallet already exists for user, using existing: ${responseData.data.accountNumber}`);

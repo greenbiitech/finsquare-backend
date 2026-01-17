@@ -11,7 +11,8 @@ import { MonoService } from '../../integrations/mono/mono.service';
 import { PsbWaasService } from '../../integrations/psb-waas/psb-waas.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ZeptomailService } from '../../integrations/zeptomail/zeptomail.service';
-import { InitiateBvnDto, VerifyBvnDto, VerifyBvnOtpDto, CompleteStep2Dto, CompleteStep3Dto, CompleteStep4Dto, CompleteStep5Dto } from './dto';
+import { InitiateBvnDto, VerifyBvnDto, VerifyBvnOtpDto, CompleteStep2Dto, CompleteStep3Dto, CompleteStep4Dto, CompleteStep5Dto, WithdrawDto, ResolveAccountDto } from './dto';
+
 import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
@@ -24,7 +25,7 @@ export class WalletService {
     private psbWaasService: PsbWaasService,
     private notificationsService: NotificationsService,
     private zeptomailService: ZeptomailService,
-  ) {}
+  ) { }
 
   /**
    * Step 1: Initiate BVN validation
@@ -701,7 +702,7 @@ export class WalletService {
 
       const accountNumber = result.externalWalletId!;
       const accountName = (result.externalWalletDetails as any)?.accountName ||
-                         `${psbRequest.otherNames} ${psbRequest.lastName}`;
+        `${psbRequest.otherNames} ${psbRequest.lastName}`;
       const userName = user.firstName || 'there';
 
       // Send notifications
@@ -1085,5 +1086,166 @@ export class WalletService {
     }
 
     return result;
+  }
+  async getBankList() {
+    return this.psbWaasService.getBankList();
+  }
+
+  async resolveAccount(dto: ResolveAccountDto) {
+    return this.psbWaasService.resolveAccount(dto.accountNumber, dto.bankCode);
+  }
+
+  async transferFunds(userId: string, dto: WithdrawDto) {
+    this.logger.log(`Initiating transfer/withdrawal for user ${userId} to ${dto.destinationAccountNumber}`);
+
+    // 1. Get User and Wallet
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { wallets: { where: { walletType: 'MAIN' } } },
+    });
+
+    if (!user || !user.wallets || user.wallets.length === 0) {
+      throw new BadRequestException('User wallet not found');
+    }
+
+    const wallet = user.wallets[0];
+
+    // 2. Verify Transaction PIN
+    if (!user.transactionPin) {
+      throw new BadRequestException('Transaction PIN not set');
+    }
+
+    const isPinValid = await bcrypt.compare(dto.transactionPin, user.transactionPin);
+    if (!isPinValid) {
+      throw new BadRequestException('Invalid transaction PIN');
+    }
+
+    // 3. Check Wallet Balance (Local)
+    if (wallet.balance < dto.amount) {
+      throw new BadRequestException('Insufficient funds');
+    }
+
+    // 4. Prepare 9PSB Request
+    // Generate valid external reference
+    const transactionTrackingRef = `TRX-${uuidv4().substring(0, 12).toUpperCase()}`;
+
+    // Get Sender details from wallet metadata
+    const walletDetails = wallet.externalWalletDetails as any;
+    const senderAccount = walletDetails?.accountNumber;
+    const senderName = walletDetails?.accountName || `${user.firstName} ${user.lastName}`;
+
+    if (!senderAccount) {
+      throw new InternalServerErrorException('Wallet account number missing');
+    }
+
+    const requestPayload = {
+      transaction: {
+        reference: transactionTrackingRef,
+      },
+      order: {
+        amount: dto.amount.toString(),
+        status: 'PAID',
+        currency: 'NGN',
+        amountpaid: dto.amount.toString(),
+        description: dto.narration,
+      },
+      customer: {
+        account: {
+          number: dto.destinationAccountNumber,
+          bank: dto.destinationBankCode,
+          senderbankname: '9PSB', // Assuming sender is 9PSB
+          type: 'DYNAMIC', // Usually DYNAMIC for one-off transfers
+          senderaccountnumber: senderAccount,
+          sendername: senderName,
+          name: dto.destinationAccountName,
+        },
+      },
+      merchant: {
+        merchant: 'FinSquare', // Or configured merchant code
+      },
+      transactionType: 'OTHER_BANKS',
+      narration: dto.narration,
+    };
+
+    // 5. Create PENDING Transaction in DB
+    const transaction = await this.prisma.transaction.create({
+      data: {
+        userId,
+        walletId: wallet.id,
+        amount: dto.amount,
+        transactionType: 'TRANSFER',
+        status: 'PENDING',
+        reference: transactionTrackingRef,
+        reason: dto.narration,
+        details: {
+          destinationAccount: dto.destinationAccountNumber,
+          destinationBank: dto.destinationBankCode,
+          destinationName: dto.destinationAccountName,
+        },
+      },
+    });
+
+    try {
+      // 6. Call 9PSB API
+      const response = await this.psbWaasService.transferToOtherBank(requestPayload);
+
+      if (response.status === 'SUCCESS' || response.message?.toLowerCase().includes('success')) {
+        // 7. Success - Update Wallet Balance and Transaction Status
+        await this.prisma.$transaction(async (tx) => {
+          // Debit wallet
+          await tx.wallet.update({
+            where: { id: wallet.id },
+            data: {
+              balance: { decrement: dto.amount },
+            },
+          });
+
+          // Update transaction
+          await tx.transaction.update({
+            where: { id: transaction.id },
+            data: { status: 'SUCCESS' },
+          });
+        });
+
+        // 8. Notifications (Async)
+        try {
+          await this.notificationsService.sendToUser(
+            user.id,
+            'Debit Alert',
+            `You have successfully transferred NGN${dto.amount} to ${dto.destinationAccountName}.`
+          );
+        } catch (e) {
+          this.logger.error('Failed to send push notification', e);
+        }
+
+        return {
+          success: true,
+          message: 'Transfer successful',
+          data: {
+            reference: transactionTrackingRef,
+            amount: dto.amount,
+            newBalance: wallet.balance - dto.amount,
+          },
+        };
+      } else {
+        throw new Error(response.message || 'Transfer failed at 9PSB');
+      }
+    } catch (error: any) {
+      this.logger.error(`Transfer failed for user ${userId}:`, error);
+
+      // Update transaction to FAILED
+      await this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: {
+          status: 'FAILED',
+          details: {
+            ...(transaction.details as object || {}),
+            error: error.message,
+          },
+        },
+      });
+
+      throw new BadRequestException(error.message || 'Transfer failed');
+    }
   }
 }

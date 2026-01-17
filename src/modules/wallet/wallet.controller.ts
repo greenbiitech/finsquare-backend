@@ -17,7 +17,7 @@ import type { Request } from 'express';
 import { WalletService } from './wallet.service';
 import { PsbWaasService } from '../../integrations/psb-waas/psb-waas.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { InitiateBvnDto, VerifyBvnDto, VerifyBvnOtpDto, CompleteStep2Dto, CompleteStep3Dto, CompleteStep4Dto, CompleteStep5Dto } from './dto';
+import { InitiateBvnDto, VerifyBvnDto, VerifyBvnOtpDto, CompleteStep2Dto, CompleteStep3Dto, CompleteStep4Dto, CompleteStep5Dto, WithdrawDto, TransferDto, ResolveAccountDto } from './dto';
 import { PsbWebhookDto } from './dto/psb-webhook.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -32,7 +32,7 @@ export class WalletController {
     private readonly psbWaasService: PsbWaasService,
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
-  ) {}
+  ) { }
 
   // ============================================
   // BVN VALIDATION FLOW
@@ -191,6 +191,68 @@ export class WalletController {
   })
   getBalance(@CurrentUser() user: { userId: string }) {
     return this.walletService.getWalletBalance(user.userId);
+  }
+
+  // ============================================
+  // WITHDRAWAL AND TRANSFER
+  // ============================================
+
+  @Get('banks')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get list of banks',
+    description: 'Fetch list of available banks from 9PSB',
+  })
+  getBanks() {
+    return this.walletService.getBankList();
+  }
+
+  @Post('resolve-account')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Resolve bank account',
+    description: 'Resolve account name for a given account number and bank code',
+  })
+  resolveAccount(@Body() dto: ResolveAccountDto) {
+    return this.walletService.resolveAccount(dto);
+  }
+
+  @Post('withdraw')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Withdraw Funds / Transfer to Bank',
+    description: 'Initiate a withdrawal or transfer to an external bank account',
+  })
+  withdraw(
+    @CurrentUser() user: { userId: string },
+    @Body() dto: WithdrawDto,
+  ) {
+    return this.walletService.transferFunds(user.userId, dto);
+  }
+
+  @Post('transfer')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Transfer Funds (Alias)',
+    description: 'Initiate a transfer to a recipient. Currently same as withdrawal.',
+  })
+  transfer(
+    @CurrentUser() user: { userId: string },
+    @Body() dto: TransferDto,
+  ) {
+    // Map TransferDto to WithdrawDto format
+    return this.walletService.transferFunds(user.userId, {
+      amount: dto.amount,
+      destinationAccountNumber: dto.recipientAccountNumber,
+      destinationBankCode: dto.destinationBankCode,
+      destinationAccountName: dto.destinationAccountName,
+      narration: dto.narration,
+      transactionPin: dto.transactionPin,
+    });
   }
 
   // ============================================

@@ -5,3 +5,5 @@ export * from './complete-step2.dto';
 export * from './complete-step3.dto';
 export * from './complete-step4.dto';
 export * from './complete-step5.dto';
+export * from './psb-webhook.dto';
+export * from './transaction.dto';
