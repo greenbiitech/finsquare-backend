@@ -781,7 +781,7 @@ export class WalletService {
         throw new BadRequestException('Failed to fetch wallet balance from provider');
       }
 
-      const psbBalance = psbResponse.data?.availableBalance || psbResponse.data?.balance || '0';
+      const psbBalance = psbResponse.data?.maximumBalance || psbResponse.data?.availableBalance || psbResponse.data?.balance || '0';
       const psbBalanceNum = parseFloat(psbBalance) || 0;
 
       // Sync local balance with 9PSB
