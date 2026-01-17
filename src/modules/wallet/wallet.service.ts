@@ -786,7 +786,16 @@ export class WalletService {
 
       // Sync local balance with 9PSB
       let syncedFromPsb = false;
-      if (wallet.balance !== psbBalanceNum) {
+      let finalBalance = psbBalanceNum;
+
+      // Check if local balance was updated recently (e.g. within last 15 seconds)
+      // This prevents overwriting a just-debited local balance with a stale (higher) 9PSB balance due to latency
+      const isLocalFresh = (new Date().getTime() - new Date(wallet.updatedAt).getTime()) < 15000;
+
+      if (isLocalFresh && wallet.balance < psbBalanceNum) {
+        this.logger.log(`Skipping sync: Local balance (${wallet.balance}) is fresh and lower than 9PSB (${psbBalanceNum})`);
+        finalBalance = wallet.balance;
+      } else if (wallet.balance !== psbBalanceNum) {
         this.logger.log(`Syncing balance: local=${wallet.balance}, 9PSB=${psbBalanceNum}`);
         await this.prisma.wallet.update({
           where: { id: wallet.id },
@@ -799,7 +808,7 @@ export class WalletService {
         success: true,
         message: 'Wallet balance retrieved',
         data: {
-          balance: psbBalanceNum.toFixed(2),
+          balance: finalBalance.toFixed(2),
           accountNumber,
           accountName: externalDetails?.fullName || psbResponse.data?.accountName,
           walletId: wallet.id,
