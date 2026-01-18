@@ -112,8 +112,8 @@ export class PsbWebhookController {
     const credentials = Buffer.from(base64Credentials, 'base64').toString('ascii');
     const [username, password] = credentials.split(':');
 
-    const validUsername = this.configService.get<string>('PSB_BASIC_AUTH_USERNAME');
-    const validPassword = this.configService.get<string>('PSB_BASIC_AUTH_PASSWORD');
+    const validUsername = this.configService.get<string>('FINANCE_9PSB_BASIC_AUTH_USERNAME');
+    const validPassword = this.configService.get<string>('FINANCE_9PSB_BASIC_AUTH_PASSWORD');
 
     this.logger.log(`Auth check: received=${username}, expected=${validUsername}, match=${username === validUsername}`);
 

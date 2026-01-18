@@ -90,16 +90,15 @@ export class PsbWaasService {
   constructor(private configService: ConfigService) { }
 
   private getConfig() {
-    // Use env var names matching .env file
-    const apiUrl = this.configService.get<string>('PSB_WALLET_API_URL');
+    const apiUrl = this.configService.get<string>('FINANCE_9PSB_WALLET_API_URL');
     return {
       apiUrl,
       // Auth URL is base URL + /authenticate
       authUrl: apiUrl ? `${apiUrl}/authenticate` : undefined,
-      username: this.configService.get<string>('PSB_WALLET_USERNAME'),
-      password: this.configService.get<string>('PSB_WALLET_PASSWORD'),
-      clientId: this.configService.get<string>('PSB_WALLET_CLIENT_ID'),
-      clientSecret: this.configService.get<string>('PSB_WALLET_CLIENT_SECRET'),
+      username: this.configService.get<string>('FINANCE_9PSB_WALLET_USERNAME'),
+      password: this.configService.get<string>('FINANCE_9PSB_WALLET_PASSWORD'),
+      clientId: this.configService.get<string>('FINANCE_9PSB_WALLET_CLIENT_ID'),
+      clientSecret: this.configService.get<string>('FINANCE_9PSB_WALLET_CLIENT_SECRET'),
     };
   }
 
