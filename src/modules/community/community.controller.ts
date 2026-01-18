@@ -24,6 +24,7 @@ import {
   BulkEmailInviteDto,
   UpdateInviteLinkConfigDto,
 } from './dto/create-invite.dto';
+import { CreateCommunityWalletDto } from './dto/create-community-wallet.dto';
 
 @ApiTags('Communities')
 @Controller('api/v1/communities')
@@ -152,6 +153,62 @@ export class CommunityController {
     @Param('communityId') communityId: string,
   ) {
     return this.communityService.getCommunityWallet(user.userId, communityId);
+  }
+
+  @Get(':communityId/co-admins')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get community Co-Admins',
+    description: 'Get list of Co-Admins for signatory selection. Only Admin can access.',
+  })
+  @ApiParam({ name: 'communityId', description: 'Community ID' })
+  @ApiResponse({ status: 200, description: 'Co-Admins retrieved' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not an admin' })
+  async getCoAdmins(
+    @CurrentUser() user: { userId: string },
+    @Param('communityId') communityId: string,
+  ) {
+    return this.communityService.getCoAdmins(user.userId, communityId);
+  }
+
+  @Get(':communityId/wallet-eligibility')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Check wallet creation eligibility',
+    description: 'Check if Admin can create a community wallet. Requires personal wallet and 2+ Co-Admins.',
+  })
+  @ApiParam({ name: 'communityId', description: 'Community ID' })
+  @ApiResponse({ status: 200, description: 'Eligibility checked' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not an admin' })
+  async checkWalletEligibility(
+    @CurrentUser() user: { userId: string },
+    @Param('communityId') communityId: string,
+  ) {
+    return this.communityService.checkWalletEligibility(user.userId, communityId);
+  }
+
+  @Post(':communityId/wallet')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Create community wallet',
+    description: 'Create a community wallet with signatories, approval rules, and transaction PIN. Only Admin can create.',
+  })
+  @ApiParam({ name: 'communityId', description: 'Community ID' })
+  @ApiResponse({ status: 201, description: 'Community wallet created' })
+  @ApiResponse({ status: 400, description: 'Bad request - wallet exists or not eligible' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not an admin' })
+  async createCommunityWallet(
+    @CurrentUser() user: { userId: string },
+    @Param('communityId') communityId: string,
+    @Body() dto: CreateCommunityWalletDto,
+  ) {
+    return this.communityService.createCommunityWallet(user.userId, communityId, dto);
   }
 
   @Get(':communityId/invite-link')

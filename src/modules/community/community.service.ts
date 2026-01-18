@@ -7,7 +7,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ZeptomailService } from '../../integrations/zeptomail/zeptomail.service';
-import { CommunityRole, InviteType, JoinType, JoinRequestStatus } from '@prisma/client';
+import { CommunityRole, InviteType, JoinType, JoinRequestStatus, ApprovalRule, WalletSetupStep } from '@prisma/client';
 import { CreateCommunityDto } from './dto/create-community.dto';
 import {
   CreateInviteLinkDto,
@@ -16,7 +16,9 @@ import {
   JoinTypeDto,
   UpdateInviteLinkConfigDto,
 } from './dto/create-invite.dto';
+import { CreateCommunityWalletDto } from './dto/create-community-wallet.dto';
 import { randomBytes } from 'crypto';
+import * as bcrypt from 'bcrypt';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
@@ -1544,12 +1546,320 @@ export class CommunityService {
           id: communityWallet.id,
           balance: communityWallet.balance.toString(),
           signatories: communityWallet.signatories,
+          approvalRule: communityWallet.approvalRule,
           externalWalletId: communityWallet.externalWalletId,
           isActive: communityWallet.isActive,
           createdAt: communityWallet.createdAt,
           updatedAt: communityWallet.updatedAt,
         },
         canWithdraw: membership.role === CommunityRole.ADMIN, // Only Admin can withdraw
+      },
+    };
+  }
+
+  /**
+   * Get all Co-Admins of a community (for signatory selection)
+   * Only Admin can access this
+   */
+  async getCoAdmins(userId: string, communityId: string) {
+    // Check if user is Admin of this community
+    const membership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId, communityId },
+      },
+      include: {
+        community: {
+          select: {
+            id: true,
+            name: true,
+            isDefault: true,
+          },
+        },
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenException('You are not a member of this community');
+    }
+
+    if (membership.role !== CommunityRole.ADMIN) {
+      throw new ForbiddenException('Only Admin can access co-admin list');
+    }
+
+    if (membership.community.isDefault) {
+      throw new BadRequestException('Default community does not support co-admins');
+    }
+
+    // Get all Co-Admins of this community
+    const coAdmins = await this.prisma.membership.findMany({
+      where: {
+        communityId,
+        role: CommunityRole.CO_ADMIN,
+        isActive: true,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            fullName: true,
+            email: true,
+            photo: true,
+          },
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Co-Admins retrieved',
+      data: {
+        communityId,
+        communityName: membership.community.name,
+        coAdmins: coAdmins.map((ca) => ({
+          userId: ca.user.id,
+          firstName: ca.user.firstName,
+          lastName: ca.user.lastName,
+          fullName: ca.user.fullName,
+          email: ca.user.email,
+          photo: ca.user.photo,
+          joinedAt: ca.joinedAt,
+        })),
+        count: coAdmins.length,
+      },
+    };
+  }
+
+  /**
+   * Check if Admin can create a community wallet
+   * Requirements:
+   * 1. User must be Admin
+   * 2. Admin must have personal wallet activated
+   * 3. Community must have at least 2 Co-Admins
+   */
+  async checkWalletEligibility(userId: string, communityId: string) {
+    // Check if user is Admin of this community
+    const membership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId, communityId },
+      },
+      include: {
+        community: {
+          select: {
+            id: true,
+            name: true,
+            isDefault: true,
+          },
+        },
+        user: {
+          select: {
+            id: true,
+            walletSetupStep: true,
+          },
+        },
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenException('You are not a member of this community');
+    }
+
+    if (membership.role !== CommunityRole.ADMIN) {
+      throw new ForbiddenException('Only Admin can create community wallet');
+    }
+
+    if (membership.community.isDefault) {
+      throw new BadRequestException('Default community cannot have a wallet');
+    }
+
+    // Check if wallet already exists
+    const existingWallet = await this.prisma.community_wallets.findUnique({
+      where: { communityId },
+    });
+
+    if (existingWallet) {
+      return {
+        success: true,
+        message: 'Community wallet already exists',
+        data: {
+          communityId,
+          communityName: membership.community.name,
+          eligible: false,
+          reason: 'WALLET_EXISTS',
+          hasWallet: true,
+        },
+      };
+    }
+
+    // Check if Admin has personal wallet activated
+    const hasPersonalWallet = membership.user.walletSetupStep === WalletSetupStep.COMPLETED;
+
+    // Count Co-Admins
+    const coAdminCount = await this.prisma.membership.count({
+      where: {
+        communityId,
+        role: CommunityRole.CO_ADMIN,
+        isActive: true,
+      },
+    });
+
+    const hasEnoughCoAdmins = coAdminCount >= 2;
+    const eligible = hasPersonalWallet && hasEnoughCoAdmins;
+
+    let reason = null;
+    if (!hasPersonalWallet) {
+      reason = 'PERSONAL_WALLET_NOT_ACTIVATED';
+    } else if (!hasEnoughCoAdmins) {
+      reason = 'INSUFFICIENT_CO_ADMINS';
+    }
+
+    return {
+      success: true,
+      message: eligible ? 'Eligible to create community wallet' : 'Not eligible to create community wallet',
+      data: {
+        communityId,
+        communityName: membership.community.name,
+        eligible,
+        reason,
+        hasWallet: false,
+        hasPersonalWallet,
+        coAdminCount,
+        requiredCoAdmins: 2,
+      },
+    };
+  }
+
+  /**
+   * Create a community wallet
+   * Only Admin can create, requires signatory selection, approval rule, and PIN
+   */
+  async createCommunityWallet(
+    userId: string,
+    communityId: string,
+    dto: CreateCommunityWalletDto,
+  ) {
+    // Check eligibility first
+    const eligibilityResult = await this.checkWalletEligibility(userId, communityId);
+
+    if (!eligibilityResult.data.eligible) {
+      if (eligibilityResult.data.reason === 'WALLET_EXISTS') {
+        throw new BadRequestException('Community wallet already exists');
+      } else if (eligibilityResult.data.reason === 'PERSONAL_WALLET_NOT_ACTIVATED') {
+        throw new BadRequestException('You must activate your personal wallet first');
+      } else if (eligibilityResult.data.reason === 'INSUFFICIENT_CO_ADMINS') {
+        throw new BadRequestException('You need at least 2 Co-Admins to create a community wallet');
+      }
+      throw new BadRequestException('Not eligible to create community wallet');
+    }
+
+    // Verify signatory B is a valid Co-Admin
+    const signatoryBMembership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId: dto.signatoryBUserId, communityId },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+          },
+        },
+      },
+    });
+
+    if (!signatoryBMembership) {
+      throw new BadRequestException('Selected signatory is not a member of this community');
+    }
+
+    if (signatoryBMembership.role !== CommunityRole.CO_ADMIN) {
+      throw new BadRequestException('Selected signatory must be a Co-Admin');
+    }
+
+    // Get Admin details for signatory A
+    const adminMembership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId, communityId },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+          },
+        },
+        community: {
+          select: {
+            name: true,
+          },
+        },
+      },
+    });
+
+    // Hash the transaction PIN
+    const hashedPin = await bcrypt.hash(dto.transactionPin, 10);
+
+    // Create signatories array
+    const signatories = [
+      {
+        userId: userId,
+        fullName: adminMembership.user.fullName,
+        role: 'ADMIN',
+      },
+      {
+        userId: dto.signatoryBUserId,
+        fullName: signatoryBMembership.user.fullName,
+        role: 'CO_ADMIN',
+      },
+    ];
+
+    // Map DTO approval rule to Prisma enum
+    const approvalRuleMap: Record<string, ApprovalRule> = {
+      THIRTY_PERCENT: ApprovalRule.THIRTY_PERCENT,
+      FIFTY_PERCENT: ApprovalRule.FIFTY_PERCENT,
+      SEVENTY_FIVE_PERCENT: ApprovalRule.SEVENTY_FIVE_PERCENT,
+      HUNDRED_PERCENT: ApprovalRule.HUNDRED_PERCENT,
+    };
+
+    // Create the community wallet
+    const communityWallet = await this.prisma.community_wallets.create({
+      data: {
+        communityId,
+        signatories,
+        approvalRule: approvalRuleMap[dto.approvalRule],
+        transactionPin: hashedPin,
+        balance: 0,
+        isActive: true,
+      },
+    });
+
+    // Notify the selected signatory
+    this.notificationsService.sendToUser(
+      dto.signatoryBUserId,
+      'Community Wallet Created! 💰',
+      `You have been added as a signatory for ${adminMembership.community.name}'s community wallet`,
+      {
+        type: 'community_wallet_created',
+        communityId,
+        communityName: adminMembership.community.name,
+        role: 'signatory',
+      },
+    ).catch((err) => console.error('Failed to send signatory notification:', err));
+
+    return {
+      success: true,
+      message: 'Community wallet created successfully',
+      data: {
+        communityId,
+        communityName: adminMembership.community.name,
+        wallet: {
+          id: communityWallet.id,
+          balance: '0',
+          signatories: communityWallet.signatories,
+          approvalRule: communityWallet.approvalRule,
+          isActive: communityWallet.isActive,
+          createdAt: communityWallet.createdAt,
+        },
       },
     };
   }
