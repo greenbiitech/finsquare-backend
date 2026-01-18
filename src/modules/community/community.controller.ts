@@ -136,6 +136,24 @@ export class CommunityController {
     return this.communityService.getCommunityMembers(user.userId, communityId);
   }
 
+  @Get(':communityId/wallet')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get community wallet',
+    description: 'Get the community wallet details. Only admins and co-admins can access.',
+  })
+  @ApiParam({ name: 'communityId', description: 'Community ID' })
+  @ApiResponse({ status: 200, description: 'Community wallet retrieved' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not an admin or co-admin' })
+  async getCommunityWallet(
+    @CurrentUser() user: { userId: string },
+    @Param('communityId') communityId: string,
+  ) {
+    return this.communityService.getCommunityWallet(user.userId, communityId);
+  }
+
   @Get(':communityId/invite-link')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

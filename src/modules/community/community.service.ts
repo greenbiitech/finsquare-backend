@@ -1462,4 +1462,95 @@ export class CommunityService {
       },
     };
   }
+
+  /**
+   * Get community wallet details
+   * Only Admin and Co-Admin can view the community wallet
+   */
+  async getCommunityWallet(userId: string, communityId: string) {
+    // Check membership and role
+    const membership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId, communityId },
+      },
+      include: {
+        community: {
+          select: {
+            id: true,
+            name: true,
+            isDefault: true,
+          },
+        },
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenException('You are not a member of this community');
+    }
+
+    // Only Admin and Co-Admin can view community wallet
+    if (
+      membership.role !== CommunityRole.ADMIN &&
+      membership.role !== CommunityRole.CO_ADMIN
+    ) {
+      throw new ForbiddenException('Only admins can view the community wallet');
+    }
+
+    // Default FinSquare Community has no wallet
+    if (membership.community.isDefault) {
+      return {
+        success: true,
+        message: 'Default community does not have a wallet',
+        data: {
+          communityId,
+          communityName: membership.community.name,
+          hasWallet: false,
+          isDefault: true,
+          wallet: null,
+        },
+      };
+    }
+
+    // Check if community wallet exists
+    const communityWallet = await this.prisma.community_wallets.findUnique({
+      where: { communityId },
+    });
+
+    if (!communityWallet) {
+      return {
+        success: true,
+        message: 'Community wallet not created yet',
+        data: {
+          communityId,
+          communityName: membership.community.name,
+          hasWallet: false,
+          isDefault: false,
+          wallet: null,
+          canCreate: membership.role === CommunityRole.ADMIN, // Only Admin can create
+        },
+      };
+    }
+
+    // Return wallet details
+    return {
+      success: true,
+      message: 'Community wallet retrieved',
+      data: {
+        communityId,
+        communityName: membership.community.name,
+        hasWallet: true,
+        isDefault: false,
+        wallet: {
+          id: communityWallet.id,
+          balance: communityWallet.balance.toString(),
+          signatories: communityWallet.signatories,
+          externalWalletId: communityWallet.externalWalletId,
+          isActive: communityWallet.isActive,
+          createdAt: communityWallet.createdAt,
+          updatedAt: communityWallet.updatedAt,
+        },
+        canWithdraw: membership.role === CommunityRole.ADMIN, // Only Admin can withdraw
+      },
+    };
+  }
 }

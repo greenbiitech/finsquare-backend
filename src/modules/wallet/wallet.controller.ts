@@ -518,8 +518,8 @@ export class WalletController {
     const credentials = Buffer.from(base64Credentials, 'base64').toString('ascii');
     const [username, password] = credentials.split(':');
 
-    const validUsername = this.configService.get<string>('BASIC_AUTH_9PSB_USERNAME');
-    const validPassword = this.configService.get<string>('BASIC_AUTH_9PSB_PASSWORD');
+    const validUsername = this.configService.get<string>('PSB_BASIC_AUTH_USERNAME');
+    const validPassword = this.configService.get<string>('PSB_BASIC_AUTH_PASSWORD');
 
     this.logger.log(`Auth check: received=${username}, expected=${validUsername}, match=${username === validUsername}`);
 
