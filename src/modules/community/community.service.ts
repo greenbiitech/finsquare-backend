@@ -1707,7 +1707,7 @@ export class CommunityService {
     const hasEnoughCoAdmins = coAdminCount >= 2;
     const eligible = hasPersonalWallet && hasEnoughCoAdmins;
 
-    let reason = null;
+    let reason: string | null = null;
     if (!hasPersonalWallet) {
       reason = 'PERSONAL_WALLET_NOT_ACTIVATED';
     } else if (!hasEnoughCoAdmins) {
@@ -1795,6 +1795,10 @@ export class CommunityService {
         },
       },
     });
+
+    if (!adminMembership) {
+      throw new BadRequestException('Admin membership not found');
+    }
 
     // Hash the transaction PIN
     const hashedPin = await bcrypt.hash(dto.transactionPin, 10);
