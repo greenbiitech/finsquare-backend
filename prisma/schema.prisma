@@ -93,6 +93,7 @@ model User {
   memberships           Membership[]
   wallets               Wallet[]
   joinRequests          JoinRequest[]
+  withdrawalAccount     WithdrawalAccount?
 
   @@map("users")
 }
@@ -259,6 +260,22 @@ model WebhookLog {
   @@index([source])
   @@index([status])
   @@map("webhook_logs")
+}
+
+model WithdrawalAccount {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  bankCode      String
+  bankName      String
+  accountNumber String
+  accountName   String
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("withdrawal_accounts")
 }
 
 // ============================================
