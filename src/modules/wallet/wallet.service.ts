@@ -92,7 +92,8 @@ export class WalletService {
       this.logger.log(`Selecting verification method ${dto.method} for user: ${userId}`);
 
       // Call Mono API to verify with selected method
-      const response = await this.monoService.verifyBvn(dto.sessionId, dto.method);
+      // For alternate_phone method, pass the phone number
+      const response = await this.monoService.verifyBvn(dto.sessionId, dto.method, dto.phoneNumber);
 
       // Update walletSetupData with selected method
       const user = await this.prisma.user.findUnique({

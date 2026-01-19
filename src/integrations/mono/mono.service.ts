@@ -105,14 +105,21 @@ export class MonoService {
    * Step 2: Verify BVN with selected method
    * Select verification method and triggers OTP sending
    * Note: session_id is passed via x-session-id header per Mono API docs
+   * Note: For 'alternate_phone' method, phone_number is required
    */
-  async verifyBvn(sessionId: string, method: string): Promise<MonoBvnVerifyResponse> {
+  async verifyBvn(sessionId: string, method: string, phoneNumber?: string): Promise<MonoBvnVerifyResponse> {
     try {
       this.logger.log(`Verifying BVN with method: ${method}, session_id: ${sessionId}`);
 
+      // Build request body - include phone_number for alternate_phone method
+      const requestBody: { method: string; phone_number?: string } = { method };
+      if (method === 'alternate_phone' && phoneNumber) {
+        requestBody.phone_number = phoneNumber;
+      }
+
       const response = await axios.post<MonoBvnVerifyResponse>(
         `${this.baseUrl}/verify`,
-        { method },
+        requestBody,
         {
           headers: {
             ...this.getHeaders(),
