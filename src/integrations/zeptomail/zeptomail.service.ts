@@ -604,6 +604,225 @@ export class ZeptomailService {
     return this.sendEmail(to, subject, htmlBody);
   }
 
+  async sendNewMemberJoined(
+    to: string,
+    adminName: string,
+    communityName: string,
+    newMemberName: string,
+  ): Promise<boolean> {
+    const subject = `New Member Joined ${communityName}!`;
+    const htmlBody = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>New Member Joined</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+          }
+          .container {
+            max-width: 600px;
+            margin: 40px auto;
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          }
+          .header {
+            text-align: center;
+            color: #333333;
+          }
+          .icon {
+            font-size: 48px;
+            text-align: center;
+            margin: 20px 0;
+          }
+          .member-name {
+            font-size: 24px;
+            font-weight: bold;
+            color: #4CAF50;
+            margin: 20px 0;
+            text-align: center;
+          }
+          .community-badge {
+            display: inline-block;
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 500;
+            margin: 10px 0;
+          }
+          .message {
+            font-size: 16px;
+            color: #555555;
+            text-align: center;
+            line-height: 1.6;
+          }
+          .info-box {
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+          }
+          .footer {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #aaaaaa;
+            text-align: center;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="icon">👋</div>
+          <h2 class="header">New Member Alert!</h2>
+          <p class="message">Hello ${adminName},</p>
+          <p class="message">Great news! A new member has joined your community:</p>
+          <div class="member-name">${newMemberName}</div>
+          <div class="info-box">
+            <p class="message" style="margin: 0;">Has joined</p>
+            <span class="community-badge">${communityName}</span>
+          </div>
+          <p class="message">Your community is growing! 🎉</p>
+          <div class="footer">
+            This is an automated message from FinSquare. Please do not reply to this email.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    return this.sendEmail(to, subject, htmlBody);
+  }
+
+  async sendCoAdminPromotion(
+    to: string,
+    userName: string,
+    communityName: string,
+    promotedByName: string,
+  ): Promise<boolean> {
+    const subject = `🎉 You're now a Co-Admin of ${communityName}!`;
+    const htmlBody = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Co-Admin Promotion</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+          }
+          .container {
+            max-width: 600px;
+            margin: 40px auto;
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          }
+          .header {
+            text-align: center;
+            color: #333333;
+          }
+          .celebration {
+            font-size: 48px;
+            text-align: center;
+            margin: 20px 0;
+          }
+          .community-name {
+            font-size: 24px;
+            font-weight: bold;
+            color: #4CAF50;
+            margin: 20px 0;
+            text-align: center;
+          }
+          .message {
+            font-size: 16px;
+            color: #555555;
+            text-align: center;
+            line-height: 1.6;
+          }
+          .role-badge {
+            display: inline-block;
+            background-color: #4CAF50;
+            color: white;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin: 10px 0;
+          }
+          .responsibilities {
+            background-color: #e8f5e9;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+          }
+          .responsibilities h3 {
+            color: #2e7d32;
+            margin-top: 0;
+            font-size: 16px;
+          }
+          .responsibilities ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+          }
+          .responsibilities li {
+            padding: 8px 0;
+            color: #555555;
+            font-size: 14px;
+          }
+          .responsibilities li:before {
+            content: "✓ ";
+            color: #4CAF50;
+            font-weight: bold;
+          }
+          .footer {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #aaaaaa;
+            text-align: center;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="celebration">🎊</div>
+          <h2 class="header">Congratulations, ${userName}!</h2>
+          <p class="message">You have been promoted to <span class="role-badge">Co-Admin</span></p>
+          <div class="community-name">${communityName}</div>
+          <p class="message"><strong>${promotedByName}</strong> has made you a Co-Admin of this community.</p>
+          <div class="responsibilities">
+            <h3>As a Co-Admin, you can now:</h3>
+            <ul>
+              <li>Invite new members to the community</li>
+              <li>Approve or reject join requests</li>
+              <li>Manage community dues and collections</li>
+              <li>View community analytics and reports</li>
+              <li>Help manage Esusu and savings activities</li>
+            </ul>
+          </div>
+          <p class="message">Thank you for taking on this important role in your community!</p>
+          <div class="footer">
+            This is an automated message from FinSquare. Please do not reply to this email.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    return this.sendEmail(to, subject, htmlBody);
+  }
+
   async sendWalletCredited(
     to: string,
     userName: string,

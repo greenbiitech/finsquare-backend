@@ -60,20 +60,29 @@ export class CommunityService {
     memberName: string,
     newMemberUserId: string,
   ): Promise<void> {
-    // Get all admins and co-admins of the community
+    // Get all admins and co-admins of the community with their user info
     const admins = await this.prisma.membership.findMany({
       where: {
         communityId,
         role: { in: [CommunityRole.ADMIN, CommunityRole.CO_ADMIN] },
       },
-      select: { userId: true },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+          },
+        },
+      },
     });
 
-    // Send notification to each admin (except if the new member is somehow an admin)
+    // Send notification and email to each admin (except if the new member is somehow an admin)
     for (const admin of admins) {
-      if (admin.userId !== newMemberUserId) {
+      if (admin.user.id !== newMemberUserId) {
+        // Push notification
         this.notificationsService.sendToUser(
-          admin.userId,
+          admin.user.id,
           'New Member Joined! 👋',
           `${memberName} has joined ${communityName}`,
           {
@@ -84,6 +93,16 @@ export class CommunityService {
             newMemberUserId,
           },
         ).catch((err) => console.error('Failed to send admin notification:', err));
+
+        // Email notification
+        if (admin.user.email) {
+          this.zeptomailService.sendNewMemberJoined(
+            admin.user.email,
+            admin.user.fullName,
+            communityName,
+            memberName,
+          ).catch((err) => console.error('Failed to send new member email:', err));
+        }
       }
     }
   }
@@ -1601,9 +1620,16 @@ export class CommunityService {
           select: {
             id: true,
             fullName: true,
+            email: true,
           },
         },
       },
+    });
+
+    // Get admin's name for the email
+    const admin = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { fullName: true },
     });
 
     if (memberships.length !== userIds.length) {
@@ -1645,8 +1671,9 @@ export class CommunityService {
       },
     });
 
-    // Send notifications to promoted users
+    // Send notifications and emails to promoted users
     for (const member of toPromote) {
+      // Push notification
       this.notificationsService.sendToUser(
         member.userId,
         'You\'re now a Co-Admin! 🎉',
@@ -1658,6 +1685,16 @@ export class CommunityService {
           newRole: 'CO_ADMIN',
         },
       ).catch((err) => console.error('Failed to send promotion notification:', err));
+
+      // Email notification
+      if (member.user.email) {
+        this.zeptomailService.sendCoAdminPromotion(
+          member.user.email,
+          member.user.fullName,
+          adminMembership.community.name,
+          admin?.fullName || 'Admin',
+        ).catch((err) => console.error('Failed to send promotion email:', err));
+      }
     }
 
     return {
