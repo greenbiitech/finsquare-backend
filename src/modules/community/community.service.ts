@@ -1558,6 +1558,301 @@ export class CommunityService {
   }
 
   /**
+   * Add Co-Admins to a community
+   * Only Admin can promote members to Co-Admin
+   */
+  async addCoAdmins(userId: string, communityId: string, userIds: string[]) {
+    // Check if user is Admin of this community
+    const adminMembership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId, communityId },
+      },
+      include: {
+        community: {
+          select: {
+            id: true,
+            name: true,
+            isDefault: true,
+          },
+        },
+      },
+    });
+
+    if (!adminMembership) {
+      throw new ForbiddenException('You are not a member of this community');
+    }
+
+    if (adminMembership.role !== CommunityRole.ADMIN) {
+      throw new ForbiddenException('Only Admin can promote members to Co-Admin');
+    }
+
+    if (adminMembership.community.isDefault) {
+      throw new BadRequestException('Default community does not support co-admins');
+    }
+
+    // Check that all userIds are valid members of this community
+    const memberships = await this.prisma.membership.findMany({
+      where: {
+        communityId,
+        userId: { in: userIds },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+          },
+        },
+      },
+    });
+
+    if (memberships.length !== userIds.length) {
+      throw new BadRequestException('One or more users are not members of this community');
+    }
+
+    // Check that none of the users are already admins
+    const admins = memberships.filter((m) => m.role === CommunityRole.ADMIN);
+    if (admins.length > 0) {
+      throw new BadRequestException('Cannot change Admin role');
+    }
+
+    // Filter out users who are already co-admins
+    const toPromote = memberships.filter((m) => m.role === CommunityRole.MEMBER);
+
+    if (toPromote.length === 0) {
+      return {
+        success: true,
+        message: 'All selected users are already Co-Admins',
+        data: {
+          promoted: [],
+          alreadyCoAdmins: memberships.map((m) => ({
+            userId: m.user.id,
+            fullName: m.user.fullName,
+          })),
+        },
+      };
+    }
+
+    // Promote to Co-Admin
+    await this.prisma.membership.updateMany({
+      where: {
+        communityId,
+        userId: { in: toPromote.map((m) => m.userId) },
+      },
+      data: {
+        role: CommunityRole.CO_ADMIN,
+        updatedAt: new Date(),
+      },
+    });
+
+    // Send notifications to promoted users
+    for (const member of toPromote) {
+      this.notificationsService.sendToUser(
+        member.userId,
+        'You\'re now a Co-Admin! 🎉',
+        `You have been promoted to Co-Admin in ${adminMembership.community.name}`,
+        {
+          type: 'role_changed',
+          communityId,
+          communityName: adminMembership.community.name,
+          newRole: 'CO_ADMIN',
+        },
+      ).catch((err) => console.error('Failed to send promotion notification:', err));
+    }
+
+    return {
+      success: true,
+      message: `Successfully promoted ${toPromote.length} member(s) to Co-Admin`,
+      data: {
+        promoted: toPromote.map((m) => ({
+          userId: m.user.id,
+          fullName: m.user.fullName,
+        })),
+        alreadyCoAdmins: memberships
+          .filter((m) => m.role === CommunityRole.CO_ADMIN)
+          .map((m) => ({
+            userId: m.user.id,
+            fullName: m.user.fullName,
+          })),
+      },
+    };
+  }
+
+  /**
+   * Remove Co-Admin role from a user (demote to Member)
+   * Only Admin can demote Co-Admins
+   */
+  async removeCoAdmin(userId: string, communityId: string, targetUserId: string) {
+    // Check if user is Admin of this community
+    const adminMembership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId, communityId },
+      },
+      include: {
+        community: {
+          select: {
+            id: true,
+            name: true,
+            isDefault: true,
+          },
+        },
+      },
+    });
+
+    if (!adminMembership) {
+      throw new ForbiddenException('You are not a member of this community');
+    }
+
+    if (adminMembership.role !== CommunityRole.ADMIN) {
+      throw new ForbiddenException('Only Admin can demote Co-Admins');
+    }
+
+    if (adminMembership.community.isDefault) {
+      throw new BadRequestException('Default community does not support co-admins');
+    }
+
+    // Get the target user's membership
+    const targetMembership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId: targetUserId, communityId },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+          },
+        },
+      },
+    });
+
+    if (!targetMembership) {
+      throw new NotFoundException('User is not a member of this community');
+    }
+
+    if (targetMembership.role === CommunityRole.ADMIN) {
+      throw new BadRequestException('Cannot demote the Admin');
+    }
+
+    if (targetMembership.role === CommunityRole.MEMBER) {
+      return {
+        success: true,
+        message: 'User is already a Member',
+        data: {
+          userId: targetMembership.user.id,
+          fullName: targetMembership.user.fullName,
+          role: 'MEMBER',
+        },
+      };
+    }
+
+    // Demote to Member
+    await this.prisma.membership.update({
+      where: {
+        userId_communityId: { userId: targetUserId, communityId },
+      },
+      data: {
+        role: CommunityRole.MEMBER,
+        updatedAt: new Date(),
+      },
+    });
+
+    // Send notification to demoted user
+    this.notificationsService.sendToUser(
+      targetUserId,
+      'Role Updated',
+      `Your role in ${adminMembership.community.name} has been changed to Member`,
+      {
+        type: 'role_changed',
+        communityId,
+        communityName: adminMembership.community.name,
+        newRole: 'MEMBER',
+      },
+    ).catch((err) => console.error('Failed to send demotion notification:', err));
+
+    return {
+      success: true,
+      message: `${targetMembership.user.fullName} has been demoted to Member`,
+      data: {
+        userId: targetMembership.user.id,
+        fullName: targetMembership.user.fullName,
+        role: 'MEMBER',
+      },
+    };
+  }
+
+  /**
+   * Switch active community
+   * Deactivates current active community and activates the selected one
+   */
+  async switchCommunity(userId: string, communityId: string) {
+    // Verify user is a member of the target community
+    const targetMembership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId, communityId },
+      },
+      include: {
+        community: true,
+      },
+    });
+
+    if (!targetMembership) {
+      throw new NotFoundException('You are not a member of this community');
+    }
+
+    // Check if already active
+    if (targetMembership.isActive) {
+      return {
+        success: true,
+        message: 'Already in this community',
+        data: {
+          id: targetMembership.community.id,
+          name: targetMembership.community.name,
+          description: targetMembership.community.description,
+          logo: targetMembership.community.logo,
+          color: targetMembership.community.color,
+          role: targetMembership.role,
+          isActive: true,
+        },
+      };
+    }
+
+    // Switch communities in a transaction
+    await this.prisma.$transaction(async (tx) => {
+      // Deactivate all current memberships
+      await tx.membership.updateMany({
+        where: { userId, isActive: true },
+        data: { isActive: false },
+      });
+
+      // Activate target membership
+      await tx.membership.update({
+        where: {
+          userId_communityId: { userId, communityId },
+        },
+        data: {
+          isActive: true,
+          updatedAt: new Date(),
+        },
+      });
+    });
+
+    return {
+      success: true,
+      message: `Switched to ${targetMembership.community.name}`,
+      data: {
+        id: targetMembership.community.id,
+        name: targetMembership.community.name,
+        description: targetMembership.community.description,
+        logo: targetMembership.community.logo,
+        color: targetMembership.community.color,
+        role: targetMembership.role,
+        isActive: true,
+      },
+    };
+  }
+
+  /**
    * Get all Co-Admins of a community (for signatory selection)
    * Only Admin can access this
    */

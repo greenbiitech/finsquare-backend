@@ -25,6 +25,7 @@ import {
   UpdateInviteLinkConfigDto,
 } from './dto/create-invite.dto';
 import { CreateCommunityWalletDto } from './dto/create-community-wallet.dto';
+import { AddCoAdminsDto, RemoveCoAdminDto } from './dto/co-admin.dto';
 
 @ApiTags('Communities')
 @Controller('api/v1/communities')
@@ -135,6 +136,65 @@ export class CommunityController {
     @Param('communityId') communityId: string,
   ) {
     return this.communityService.getCommunityMembers(user.userId, communityId);
+  }
+
+  @Post(':communityId/add-co-admins')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Add Co-Admins',
+    description: 'Promote members to Co-Admin role. Only Admin can do this.',
+  })
+  @ApiParam({ name: 'communityId', description: 'Community ID' })
+  @ApiResponse({ status: 201, description: 'Co-Admins added successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not an admin' })
+  async addCoAdmins(
+    @CurrentUser() user: { userId: string },
+    @Param('communityId') communityId: string,
+    @Body() dto: AddCoAdminsDto,
+  ) {
+    return this.communityService.addCoAdmins(user.userId, communityId, dto.userIds);
+  }
+
+  @Post(':communityId/remove-co-admin')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Remove Co-Admin',
+    description: 'Demote a Co-Admin back to Member role. Only Admin can do this.',
+  })
+  @ApiParam({ name: 'communityId', description: 'Community ID' })
+  @ApiResponse({ status: 201, description: 'Co-Admin removed successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not an admin' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async removeCoAdmin(
+    @CurrentUser() user: { userId: string },
+    @Param('communityId') communityId: string,
+    @Body() dto: RemoveCoAdminDto,
+  ) {
+    return this.communityService.removeCoAdmin(user.userId, communityId, dto.userId);
+  }
+
+  @Post(':communityId/switch')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Switch active community',
+    description: 'Switch to a different community the user is a member of.',
+  })
+  @ApiParam({ name: 'communityId', description: 'Community ID to switch to' })
+  @ApiResponse({ status: 201, description: 'Switched successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Not a member of this community' })
+  async switchCommunity(
+    @CurrentUser() user: { userId: string },
+    @Param('communityId') communityId: string,
+  ) {
+    return this.communityService.switchCommunity(user.userId, communityId);
   }
 
   @Get(':communityId/wallet')
