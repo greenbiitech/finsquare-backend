@@ -1819,6 +1819,121 @@ export class CommunityService {
   }
 
   /**
+   * Remove a member from the community
+   * Admin and Co-Admins can remove regular members
+   * Only Admin can remove Co-Admins
+   */
+  async removeMember(userId: string, communityId: string, targetUserId: string) {
+    // Check if user has admin privileges
+    const adminMembership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId, communityId },
+      },
+      include: {
+        community: {
+          select: {
+            id: true,
+            name: true,
+            isDefault: true,
+          },
+        },
+      },
+    });
+
+    if (!adminMembership) {
+      throw new ForbiddenException('You are not a member of this community');
+    }
+
+    const isAdmin = adminMembership.role === CommunityRole.ADMIN;
+    const isCoAdmin = adminMembership.role === CommunityRole.CO_ADMIN;
+
+    if (!isAdmin && !isCoAdmin) {
+      throw new ForbiddenException('Only Admin or Co-Admin can remove members');
+    }
+
+    if (adminMembership.community.isDefault) {
+      throw new BadRequestException('Cannot remove members from default community');
+    }
+
+    // Get the target user's membership
+    const targetMembership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId: targetUserId, communityId },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    if (!targetMembership) {
+      throw new NotFoundException('User is not a member of this community');
+    }
+
+    // Cannot remove the Admin
+    if (targetMembership.role === CommunityRole.ADMIN) {
+      throw new BadRequestException('Cannot remove the Community Admin');
+    }
+
+    // Co-Admins cannot remove other Co-Admins (only Admin can)
+    if (targetMembership.role === CommunityRole.CO_ADMIN && !isAdmin) {
+      throw new ForbiddenException('Only Admin can remove Co-Admins');
+    }
+
+    // Cannot remove yourself
+    if (userId === targetUserId) {
+      throw new BadRequestException('You cannot remove yourself from the community');
+    }
+
+    // Delete the membership
+    await this.prisma.membership.delete({
+      where: {
+        userId_communityId: { userId: targetUserId, communityId },
+      },
+    });
+
+    // Send notification to removed user
+    this.notificationsService.sendToUser(
+      targetUserId,
+      'Removed from Community',
+      `You have been removed from ${adminMembership.community.name}`,
+      {
+        type: 'member_removed',
+        communityId,
+        communityName: adminMembership.community.name,
+      },
+    ).catch((err) => console.error('Failed to send removal notification:', err));
+
+    // Send email notification
+    if (targetMembership.user.email) {
+      this.zeptomailService.sendEmail(
+        targetMembership.user.email,
+        `Removed from ${adminMembership.community.name}`,
+        `
+          <p>Hello ${targetMembership.user.fullName},</p>
+          <p>You have been removed from <strong>${adminMembership.community.name}</strong> by the community admin.</p>
+          <p>If you believe this was a mistake, please contact the community administrator.</p>
+          <p>Best regards,<br>FinSquare Team</p>
+        `,
+      ).catch((err) => console.error('Failed to send removal email:', err));
+    }
+
+    return {
+      success: true,
+      message: `${targetMembership.user.fullName} has been removed from the community`,
+      data: {
+        userId: targetMembership.user.id,
+        fullName: targetMembership.user.fullName,
+      },
+    };
+  }
+
+  /**
    * Switch active community
    * Deactivates current active community and activates the selected one
    */

@@ -179,6 +179,27 @@ export class CommunityController {
     return this.communityService.removeCoAdmin(user.userId, communityId, dto.userId);
   }
 
+  @Post(':communityId/remove-member')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Remove Member',
+    description: 'Remove a member from the community. Admin and Co-Admin can remove regular members. Only Admin can remove Co-Admins.',
+  })
+  @ApiParam({ name: 'communityId', description: 'Community ID' })
+  @ApiResponse({ status: 201, description: 'Member removed successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async removeMember(
+    @CurrentUser() user: { userId: string },
+    @Param('communityId') communityId: string,
+    @Body() dto: RemoveCoAdminDto,
+  ) {
+    return this.communityService.removeMember(user.userId, communityId, dto.userId);
+  }
+
   @Post(':communityId/switch')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
