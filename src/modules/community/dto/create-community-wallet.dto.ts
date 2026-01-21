@@ -17,11 +17,19 @@ export enum ApprovalRuleDto {
 export class CreateCommunityWalletDto {
   @ApiProperty({
     example: '550e8400-e29b-41d4-a716-446655440000',
-    description: 'User ID of the Co-Admin signatory',
+    description: 'User ID of Signatory B (first Co-Admin)',
   })
   @IsNotEmpty()
   @IsString()
   signatoryBUserId: string;
+
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440001',
+    description: 'User ID of Signatory C (second Co-Admin)',
+  })
+  @IsNotEmpty()
+  @IsString()
+  signatoryCUserId: string;
 
   @ApiProperty({
     example: 'FIFTY_PERCENT',

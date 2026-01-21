@@ -2072,7 +2072,8 @@ export class CommunityService {
         communityId,
         communityName: membership.community.name,
         coAdmins: coAdmins.map((ca) => ({
-          userId: ca.user.id,
+          id: ca.user.id,
+          userId: ca.user.id, // Keep for backward compatibility
           firstName: ca.user.firstName,
           lastName: ca.user.lastName,
           fullName: ca.user.fullName,
@@ -2186,7 +2187,7 @@ export class CommunityService {
 
   /**
    * Create a community wallet
-   * Only Admin can create, requires signatory selection, approval rule, and PIN
+   * Only Admin can create, requires signatory selection (B and C), approval rule, and PIN
    */
   async createCommunityWallet(
     userId: string,
@@ -2207,6 +2208,11 @@ export class CommunityService {
       throw new BadRequestException('Not eligible to create community wallet');
     }
 
+    // Ensure signatories B and C are different
+    if (dto.signatoryBUserId === dto.signatoryCUserId) {
+      throw new BadRequestException('Signatory B and Signatory C must be different Co-Admins');
+    }
+
     // Verify signatory B is a valid Co-Admin
     const signatoryBMembership = await this.prisma.membership.findUnique({
       where: {
@@ -2223,11 +2229,34 @@ export class CommunityService {
     });
 
     if (!signatoryBMembership) {
-      throw new BadRequestException('Selected signatory is not a member of this community');
+      throw new BadRequestException('Signatory B is not a member of this community');
     }
 
     if (signatoryBMembership.role !== CommunityRole.CO_ADMIN) {
-      throw new BadRequestException('Selected signatory must be a Co-Admin');
+      throw new BadRequestException('Signatory B must be a Co-Admin');
+    }
+
+    // Verify signatory C is a valid Co-Admin
+    const signatoryCMembership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId: dto.signatoryCUserId, communityId },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+          },
+        },
+      },
+    });
+
+    if (!signatoryCMembership) {
+      throw new BadRequestException('Signatory C is not a member of this community');
+    }
+
+    if (signatoryCMembership.role !== CommunityRole.CO_ADMIN) {
+      throw new BadRequestException('Signatory C must be a Co-Admin');
     }
 
     // Get Admin details for signatory A
@@ -2257,17 +2286,25 @@ export class CommunityService {
     // Hash the transaction PIN
     const hashedPin = await bcrypt.hash(dto.transactionPin, 10);
 
-    // Create signatories array
+    // Create signatories array (3 signatories: Admin + 2 Co-Admins)
     const signatories = [
       {
         userId: userId,
         fullName: adminMembership.user.fullName,
         role: 'ADMIN',
+        label: 'Signatory A',
       },
       {
         userId: dto.signatoryBUserId,
         fullName: signatoryBMembership.user.fullName,
         role: 'CO_ADMIN',
+        label: 'Signatory B',
+      },
+      {
+        userId: dto.signatoryCUserId,
+        fullName: signatoryCMembership.user.fullName,
+        role: 'CO_ADMIN',
+        label: 'Signatory C',
       },
     ];
 
@@ -2291,18 +2328,23 @@ export class CommunityService {
       },
     });
 
-    // Notify the selected signatory
-    this.notificationsService.sendToUser(
-      dto.signatoryBUserId,
-      'Community Wallet Created! 💰',
-      `You have been added as a signatory for ${adminMembership.community.name}'s community wallet`,
-      {
-        type: 'community_wallet_created',
-        communityId,
-        communityName: adminMembership.community.name,
-        role: 'signatory',
-      },
-    ).catch((err) => console.error('Failed to send signatory notification:', err));
+    // Notify both signatories
+    const notifySignatory = (signatoryUserId: string, label: string) => {
+      this.notificationsService.sendToUser(
+        signatoryUserId,
+        'Community Wallet Created! 💰',
+        `You have been added as ${label} for ${adminMembership.community.name}'s community wallet`,
+        {
+          type: 'community_wallet_created',
+          communityId,
+          communityName: adminMembership.community.name,
+          role: 'signatory',
+        },
+      ).catch((err) => console.error('Failed to send signatory notification:', err));
+    };
+
+    notifySignatory(dto.signatoryBUserId, 'Signatory B');
+    notifySignatory(dto.signatoryCUserId, 'Signatory C');
 
     return {
       success: true,
