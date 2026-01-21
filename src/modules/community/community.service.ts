@@ -639,6 +639,11 @@ export class CommunityService {
       };
     }
 
+    // Get member count for the community
+    const memberCount = await this.prisma.membership.count({
+      where: { communityId: activeMembership.communityId },
+    });
+
     return {
       success: true,
       message: 'Active community retrieved',
@@ -650,6 +655,8 @@ export class CommunityService {
         color: activeMembership.community.color,
         role: activeMembership.role,
         joinedAt: activeMembership.joinedAt,
+        memberCount: memberCount,
+        isDefault: activeMembership.community.isDefault,
       },
     };
   }
