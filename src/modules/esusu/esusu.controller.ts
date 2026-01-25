@@ -18,7 +18,7 @@ import {
 import { EsusuService } from './esusu.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { CreateEsusuDto, RespondInvitationDto } from './dto';
+import { CreateEsusuDto, RespondInvitationDto, SelectSlotDto } from './dto';
 
 @ApiTags('Esusu')
 @Controller('api/v1/esusu')
@@ -243,6 +243,86 @@ export class EsusuController {
     @Body() dto: RespondInvitationDto,
   ) {
     return this.esusuService.respondToInvitation(user.userId, esusuId, dto.accept);
+  }
+
+  @Get(':esusuId/slots')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get available slots for FCFS Esusu',
+    description: 'Get slot availability information for First Come First Served payout order Esusus.',
+  })
+  @ApiParam({ name: 'esusuId', description: 'Esusu ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Slot details retrieved',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        data: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            description: { type: 'string', nullable: true },
+            iconUrl: { type: 'string', nullable: true },
+            contributionAmount: { type: 'number' },
+            frequency: { type: 'string' },
+            targetMembers: { type: 'number' },
+            startDate: { type: 'string', format: 'date-time' },
+            availableSlots: { type: 'array', items: { type: 'number' } },
+            takenSlots: { type: 'array', items: { type: 'number' } },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not a participant' })
+  @ApiResponse({ status: 404, description: 'Esusu not found' })
+  async getSlotDetails(
+    @CurrentUser() user: { userId: string },
+    @Param('esusuId') esusuId: string,
+  ) {
+    return this.esusuService.getSlotDetails(user.userId, esusuId);
+  }
+
+  @Post(':esusuId/select-slot')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Select a slot for FCFS Esusu',
+    description: 'Select a payout slot for First Come First Served Esusus. Only available slots can be selected.',
+  })
+  @ApiParam({ name: 'esusuId', description: 'Esusu ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Slot selected successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          properties: {
+            slotNumber: { type: 'number' },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Bad request - slot not available or already selected' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not a participant' })
+  @ApiResponse({ status: 404, description: 'Esusu not found' })
+  async selectSlot(
+    @CurrentUser() user: { userId: string },
+    @Param('esusuId') esusuId: string,
+    @Body() dto: SelectSlotDto,
+  ) {
+    return this.esusuService.selectSlot(user.userId, esusuId, dto.slotNumber);
   }
 
   @Post()

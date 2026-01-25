@@ -1077,6 +1077,187 @@ export class EsusuService {
       message: accept
         ? 'You have successfully joined this Esusu'
         : 'You have declined this invitation',
+      data: accept
+        ? {
+            esusuId: esusu.id,
+            esusuName: esusu.name,
+            payoutOrderType: esusu.payoutOrderType,
+          }
+        : null,
+    };
+  }
+
+  /**
+   * Get slot details for FCFS Esusu
+   */
+  async getSlotDetails(userId: string, esusuId: string) {
+    // Get the Esusu
+    const esusu = await this.prisma.esusu.findUnique({
+      where: { id: esusuId },
+    });
+
+    if (!esusu) {
+      throw new NotFoundException('Esusu not found');
+    }
+
+    // Check if user is a participant
+    const participation = await this.prisma.esusuParticipant.findUnique({
+      where: {
+        esusuId_userId: { esusuId, userId },
+      },
+    });
+
+    if (!participation) {
+      throw new ForbiddenException('You are not a participant in this Esusu');
+    }
+
+    // Check if Esusu uses FCFS payout order
+    if (esusu.payoutOrderType !== PayoutOrderType.FIRST_COME_FIRST_SERVED) {
+      throw new BadRequestException('This Esusu does not use First Come First Served payout order');
+    }
+
+    // Get all participants to determine taken slots
+    const allParticipants = await this.prisma.esusuParticipant.findMany({
+      where: { esusuId },
+    });
+
+    // Determine which slots are taken (have slotNumber assigned)
+    const takenSlots = allParticipants
+      .filter((p) => p.slotNumber !== null)
+      .map((p) => p.slotNumber as number)
+      .sort((a, b) => a - b);
+
+    // Generate all possible slots (1 to numberOfParticipants)
+    const allSlots = Array.from({ length: esusu.numberOfParticipants }, (_, i) => i + 1);
+    const availableSlots = allSlots.filter((slot) => !takenSlots.includes(slot));
+
+    return {
+      success: true,
+      data: {
+        id: esusu.id,
+        name: esusu.name,
+        description: esusu.description,
+        iconUrl: esusu.iconUrl,
+        contributionAmount: esusu.contributionAmount.toNumber(),
+        frequency: esusu.frequency,
+        targetMembers: esusu.numberOfParticipants,
+        startDate: esusu.collectionDate,
+        availableSlots,
+        takenSlots,
+      },
+    };
+  }
+
+  /**
+   * Select a slot for FCFS Esusu
+   */
+  async selectSlot(userId: string, esusuId: string, slotNumber: number) {
+    // Get the Esusu
+    const esusu = await this.prisma.esusu.findUnique({
+      where: { id: esusuId },
+    });
+
+    if (!esusu) {
+      throw new NotFoundException('Esusu not found');
+    }
+
+    // Check if user is a participant
+    const participation = await this.prisma.esusuParticipant.findUnique({
+      where: {
+        esusuId_userId: { esusuId, userId },
+      },
+    });
+
+    if (!participation) {
+      throw new ForbiddenException('You are not a participant in this Esusu');
+    }
+
+    // Check if Esusu uses FCFS payout order
+    if (esusu.payoutOrderType !== PayoutOrderType.FIRST_COME_FIRST_SERVED) {
+      throw new BadRequestException('This Esusu does not use First Come First Served payout order');
+    }
+
+    // Check if participant has already accepted the invitation
+    if (participation.inviteStatus !== EsusuInviteStatus.ACCEPTED) {
+      throw new BadRequestException('You must accept the invitation before selecting a slot');
+    }
+
+    // Check if user already has a slot
+    if (participation.slotNumber !== null) {
+      throw new BadRequestException(`You have already selected slot ${participation.slotNumber}`);
+    }
+
+    // Validate slot number is within range
+    if (slotNumber < 1 || slotNumber > esusu.numberOfParticipants) {
+      throw new BadRequestException(`Slot number must be between 1 and ${esusu.numberOfParticipants}`);
+    }
+
+    // Check if slot is already taken
+    const slotTaken = await this.prisma.esusuParticipant.findFirst({
+      where: {
+        esusuId,
+        slotNumber,
+      },
+    });
+
+    if (slotTaken) {
+      throw new BadRequestException(`Slot ${slotNumber} has already been taken`);
+    }
+
+    // Assign the slot
+    await this.prisma.esusuParticipant.update({
+      where: {
+        esusuId_userId: { esusuId, userId },
+      },
+      data: {
+        slotNumber,
+      },
+    });
+
+    // Check if all accepted participants have now selected slots -> update status if needed
+    const allParticipants = await this.prisma.esusuParticipant.findMany({
+      where: { esusuId },
+    });
+
+    const acceptedParticipants = allParticipants.filter(
+      (p) => p.inviteStatus === EsusuInviteStatus.ACCEPTED,
+    );
+
+    const allHaveSlots = acceptedParticipants.every((p) => p.slotNumber !== null || p.userId === userId);
+
+    if (allHaveSlots && esusu.status === EsusuStatus.PENDING_MEMBERS) {
+      // All accepted participants have selected slots, move to READY_TO_START
+      await this.prisma.esusu.update({
+        where: { id: esusuId },
+        data: { status: EsusuStatus.READY_TO_START },
+      });
+
+      // Notify creator
+      const creator = await this.prisma.user.findUnique({
+        where: { id: esusu.creatorId },
+        select: { id: true },
+      });
+
+      if (creator) {
+        this.notificationsService.sendToUser(
+          creator.id,
+          'All Slots Selected!',
+          `All participants have selected their slots for "${esusu.name}". The Esusu is ready to start!`,
+          {
+            type: 'esusu_ready',
+            esusuId,
+            esusuName: esusu.name,
+          },
+        ).catch((err) => console.error('Failed to send ready notification:', err));
+      }
+    }
+
+    return {
+      success: true,
+      message: `You have selected slot ${slotNumber}`,
+      data: {
+        slotNumber,
+      },
     };
   }
 }
