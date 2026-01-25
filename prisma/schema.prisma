@@ -281,6 +281,140 @@ model WithdrawalAccount {
 }
 
 // ============================================
+// ESUSU MODELS
+// ============================================
+
+model Esusu {
+  id                      String              @id @default(uuid())
+  communityId             String
+  creatorId               String
+  name                    String
+  description             String?
+  iconUrl                 String?
+  numberOfParticipants    Int
+  contributionAmount      Decimal             @db.Decimal(12, 2)
+  frequency               PaymentFrequency
+  participationDeadline   DateTime
+  collectionDate          DateTime
+  takeCommission          Boolean             @default(false)
+  commissionPercentage    Int?                // 1-50
+  platformFeePercentage   Decimal             @default(1.5) @db.Decimal(5, 2)
+  payoutOrderType         PayoutOrderType
+  status                  EsusuStatus         @default(PENDING_MEMBERS)
+  currentCycle            Int                 @default(0)
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  participants            EsusuParticipant[]
+  cycles                  EsusuCycle[]
+
+  @@unique([communityId, name, status])
+  @@index([communityId])
+  @@index([creatorId])
+  @@index([status])
+  @@map("esusus")
+}
+
+model EsusuParticipant {
+  id                String                    @id @default(uuid())
+  esusuId           String
+  userId            String
+  slotNumber        Int?                      // Assigned after acceptance or deadline
+  inviteStatus      EsusuInviteStatus         @default(INVITED)
+  invitedAt         DateTime                  @default(now())
+  respondedAt       DateTime?
+  isCreator         Boolean                   @default(false)
+  totalContributed  Decimal                   @default(0) @db.Decimal(12, 2)
+  totalReceived     Decimal                   @default(0) @db.Decimal(12, 2)
+  defaultCount      Int                       @default(0)
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  esusu             Esusu                     @relation(fields: [esusuId], references: [id], onDelete: Cascade)
+  contributions     EsusuContribution[]
+
+  @@unique([esusuId, userId])
+  @@index([esusuId])
+  @@index([userId])
+  @@map("esusu_participants")
+}
+
+model EsusuCycle {
+  id                String              @id @default(uuid())
+  esusuId           String
+  cycleNumber       Int
+  startDate         DateTime
+  endDate           DateTime
+  payoutDate        DateTime
+  receiverId        String?             // User ID of the receiver for this cycle
+  expectedPool      Decimal             @db.Decimal(12, 2)
+  collectedAmount   Decimal             @default(0) @db.Decimal(12, 2)
+  platformFee       Decimal             @db.Decimal(12, 2)
+  commission        Decimal             @default(0) @db.Decimal(12, 2)
+  netPayout         Decimal             @db.Decimal(12, 2)
+  status            EsusuCycleStatus    @default(UPCOMING)
+  payoutStatus      PayoutStatus        @default(PENDING)
+  payoutAt          DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  esusu             Esusu               @relation(fields: [esusuId], references: [id], onDelete: Cascade)
+  contributions     EsusuContribution[]
+  payout            EsusuPayout?
+
+  @@unique([esusuId, cycleNumber])
+  @@index([esusuId])
+  @@index([receiverId])
+  @@map("esusu_cycles")
+}
+
+model EsusuContribution {
+  id              String                    @id @default(uuid())
+  esusuId         String
+  cycleId         String
+  participantId   String
+  userId          String
+  amount          Decimal                   @db.Decimal(12, 2)
+  status          ContributionStatus        @default(PENDING)
+  dueDate         DateTime
+  paidAt          DateTime?
+  transactionRef  String?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  cycle           EsusuCycle                @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  participant     EsusuParticipant          @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@unique([cycleId, participantId])
+  @@index([esusuId])
+  @@index([cycleId])
+  @@index([userId])
+  @@map("esusu_contributions")
+}
+
+model EsusuPayout {
+  id              String        @id @default(uuid())
+  esusuId         String
+  cycleId         String        @unique
+  receiverId      String
+  grossAmount     Decimal       @db.Decimal(12, 2)
+  platformFee     Decimal       @db.Decimal(12, 2)
+  commission      Decimal       @default(0) @db.Decimal(12, 2)
+  netAmount       Decimal       @db.Decimal(12, 2)
+  status          PayoutStatus  @default(PENDING)
+  transactionRef  String?
+  processedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  cycle           EsusuCycle    @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+
+  @@index([esusuId])
+  @@index([receiverId])
+  @@map("esusu_payouts")
+}
+
+// ============================================
 // ENUMS
 // ============================================
 
@@ -342,4 +476,55 @@ enum ApprovalRule {
   FIFTY_PERCENT
   SEVENTY_FIVE_PERCENT
   HUNDRED_PERCENT
+}
+
+// Esusu Enums
+enum PaymentFrequency {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+}
+
+enum PayoutOrderType {
+  RANDOM
+  FIRST_COME_FIRST_SERVED
+}
+
+enum EsusuStatus {
+  PENDING_MEMBERS     // Waiting for participants to accept
+  READY_TO_START      // All accepted, waiting for collection date
+  ACTIVE              // Cycles running
+  COMPLETED           // All cycles done
+  CANCELLED           // Cancelled by admin or system
+  PAUSED              // Temporarily paused
+}
+
+enum EsusuInviteStatus {
+  INVITED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+enum EsusuCycleStatus {
+  UPCOMING
+  ACTIVE
+  COLLECTING
+  PAYOUT_PENDING
+  COMPLETED
+}
+
+enum ContributionStatus {
+  PENDING
+  PAID
+  LATE
+  UNPAID
+  DEFAULTED
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
 }
