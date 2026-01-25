@@ -295,11 +295,15 @@ export class EsusuService {
       });
 
       // Create participant records
+      // Creator is auto-accepted (they created it, so they don't need to accept their own invitation)
       const participantRecords = participantIds.map((participantUserId) => ({
         esusuId: esusu.id,
         userId: participantUserId,
-        inviteStatus: EsusuInviteStatus.INVITED,
+        inviteStatus: participantUserId === userId
+          ? EsusuInviteStatus.ACCEPTED
+          : EsusuInviteStatus.INVITED,
         isCreator: participantUserId === userId,
+        respondedAt: participantUserId === userId ? new Date() : null,
       }));
 
       await tx.esusuParticipant.createMany({
@@ -609,7 +613,9 @@ export class EsusuService {
         include: {
           participants: {
             select: {
+              userId: true,
               inviteStatus: true,
+              slotNumber: true,
             },
           },
           cycles: {
@@ -642,6 +648,12 @@ export class EsusuService {
           (p) => p.inviteStatus === EsusuInviteStatus.INVITED,
         ).length;
 
+        // Check if admin is a participant and get their participation details
+        const adminParticipation = esusu.participants.find((p) => p.userId === userId);
+        const isParticipant = !!adminParticipation;
+        const inviteStatus = adminParticipation?.inviteStatus || null;
+        const slotNumber = adminParticipation?.slotNumber || null;
+
         // Get next payout date from cycles
         const nextPayoutDate = esusu.cycles[0]?.payoutDate || null;
 
@@ -669,6 +681,7 @@ export class EsusuService {
           iconUrl: esusu.iconUrl,
           contributionAmount: Number(esusu.contributionAmount),
           frequency: esusu.frequency,
+          payoutOrderType: esusu.payoutOrderType,
           numberOfParticipants: esusu.numberOfParticipants,
           currentCycle: esusu.currentCycle,
           totalCycles: esusu.numberOfParticipants,
@@ -680,6 +693,10 @@ export class EsusuService {
           participationDeadline: esusu.participationDeadline,
           isCreator: esusu.creatorId === userId,
           creatorName: creatorMap.get(esusu.creatorId) || 'Unknown',
+          // Admin participation fields for navigation
+          isParticipant,
+          inviteStatus,
+          slotNumber,
         };
       });
 
@@ -769,6 +786,7 @@ export class EsusuService {
           iconUrl: esusu.iconUrl,
           contributionAmount: Number(esusu.contributionAmount),
           frequency: esusu.frequency,
+          payoutOrderType: esusu.payoutOrderType,
           numberOfParticipants: esusu.numberOfParticipants,
           currentCycle: esusu.currentCycle,
           totalCycles: esusu.numberOfParticipants,
@@ -846,6 +864,7 @@ export class EsusuService {
           photo: m.user.photo,
           role: m.role,
           isAdmin: m.role === CommunityRole.ADMIN,
+          isCurrentUser: m.user.id === userId,
         })),
         totalCount: members.length,
       },
@@ -1027,7 +1046,8 @@ export class EsusuService {
     });
 
     // If accepted, check if all members have accepted -> update Esusu status
-    if (accept) {
+    // For FCFS payout order, don't set READY_TO_START here - wait until all members select slots
+    if (accept && esusu.payoutOrderType === PayoutOrderType.RANDOM) {
       const allParticipants = await this.prisma.esusuParticipant.findMany({
         where: { esusuId },
       });
@@ -1318,7 +1338,9 @@ export class EsusuService {
   }
 
   /**
-   * Get waiting room details for a member
+   * Get waiting room details for Admin or Member
+   * Admin (creator) can access even if not a participant
+   * Members must be participants
    */
   async getWaitingRoomDetails(userId: string, esusuId: string) {
     // Get the Esusu
@@ -1330,6 +1352,9 @@ export class EsusuService {
       throw new NotFoundException('Esusu not found');
     }
 
+    // Check if user is the creator (admin)
+    const isCreator = esusu.creatorId === userId;
+
     // Check if user is a participant
     const participation = await this.prisma.esusuParticipant.findUnique({
       where: {
@@ -1337,8 +1362,9 @@ export class EsusuService {
       },
     });
 
-    if (!participation) {
-      throw new ForbiddenException('You are not a participant in this Esusu');
+    // Must be either creator or participant to access
+    if (!isCreator && !participation) {
+      throw new ForbiddenException('You are not authorized to view this Esusu');
     }
 
     // Get all participants with their user details
