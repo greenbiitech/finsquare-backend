@@ -1072,6 +1072,57 @@ export class EsusuService {
       ).catch((err) => console.error('Failed to send response notification:', err));
     }
 
+    // Send confirmation notification and email to the member
+    if (participantUser) {
+      if (accept) {
+        // Push notification to member
+        this.notificationsService.sendToUser(
+          participantUser.id,
+          'Esusu Joined Successfully!',
+          `You have successfully joined "${esusu.name}". You'll be notified when the Esusu starts.`,
+          {
+            type: 'esusu_joined',
+            esusuId,
+            esusuName: esusu.name,
+          },
+        ).catch((err) => console.error('Failed to send member join notification:', err));
+
+        // Email to member
+        const contributionAmount = esusu.contributionAmount.toNumber().toLocaleString();
+        const startDate = esusu.collectionDate.toLocaleDateString('en-NG', { day: 'numeric', month: 'long', year: 'numeric' });
+        this.zeptomailService.sendEmail(
+          participantUser.email,
+          `You've Joined ${esusu.name} - FinSquare`,
+          `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #8B20E9;">Welcome to ${esusu.name}!</h2>
+              <p>Hi ${participantUser.fullName},</p>
+              <p>You have successfully joined the Esusu "<strong>${esusu.name}</strong>".</p>
+              <div style="background-color: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
+                <p style="margin: 8px 0;"><strong>Contribution Amount:</strong> ₦${contributionAmount}</p>
+                <p style="margin: 8px 0;"><strong>Frequency:</strong> ${esusu.frequency}</p>
+                <p style="margin: 8px 0;"><strong>Start Date:</strong> ${startDate}</p>
+              </div>
+              <p>You'll receive a notification when the Esusu is ready to start.</p>
+              <p>Best regards,<br>The FinSquare Team</p>
+            </div>
+          `,
+        ).catch((err) => console.error('Failed to send member join email:', err));
+      } else {
+        // Push notification for decline confirmation
+        this.notificationsService.sendToUser(
+          participantUser.id,
+          'Esusu Invitation Declined',
+          `You have declined the invitation to join "${esusu.name}".`,
+          {
+            type: 'esusu_declined',
+            esusuId,
+            esusuName: esusu.name,
+          },
+        ).catch((err) => console.error('Failed to send member decline notification:', err));
+      }
+    }
+
     return {
       success: true,
       message: accept
