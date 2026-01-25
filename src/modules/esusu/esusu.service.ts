@@ -1265,19 +1265,24 @@ export class EsusuService {
       },
     });
 
-    // Check if all accepted participants have now selected slots -> update status if needed
+    // Check if ALL participants have accepted AND selected slots -> update status if needed
     const allParticipants = await this.prisma.esusuParticipant.findMany({
       where: { esusuId },
     });
 
-    const acceptedParticipants = allParticipants.filter(
+    // Check if everyone has accepted (no one still INVITED)
+    const allAccepted = allParticipants.every(
       (p) => p.inviteStatus === EsusuInviteStatus.ACCEPTED,
     );
 
-    const allHaveSlots = acceptedParticipants.every((p) => p.slotNumber !== null || p.userId === userId);
+    // Check if all accepted participants have selected slots
+    const allHaveSlots = allParticipants.every(
+      (p) => p.inviteStatus === EsusuInviteStatus.ACCEPTED && p.slotNumber !== null,
+    );
 
-    if (allHaveSlots && esusu.status === EsusuStatus.PENDING_MEMBERS) {
-      // All accepted participants have selected slots, move to READY_TO_START
+    // Only update status and notify if ALL participants have accepted AND selected slots
+    if (allAccepted && allHaveSlots && esusu.status === EsusuStatus.PENDING_MEMBERS) {
+      // All participants have accepted and selected slots, move to READY_TO_START
       await this.prisma.esusu.update({
         where: { id: esusuId },
         data: { status: EsusuStatus.READY_TO_START },
