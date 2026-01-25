@@ -325,6 +325,64 @@ export class EsusuController {
     return this.esusuService.selectSlot(user.userId, esusuId, dto.slotNumber);
   }
 
+  @Get(':esusuId/waiting-room')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get waiting room details',
+    description: 'Get Esusu details with participant list and countdown for the waiting room screen.',
+  })
+  @ApiParam({ name: 'esusuId', description: 'Esusu ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Waiting room details retrieved',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        data: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            description: { type: 'string', nullable: true },
+            iconUrl: { type: 'string', nullable: true },
+            contributionAmount: { type: 'number' },
+            frequency: { type: 'string' },
+            targetMembers: { type: 'number' },
+            startDate: { type: 'string', format: 'date-time' },
+            status: { type: 'string' },
+            payoutOrderType: { type: 'string' },
+            participants: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  fullName: { type: 'string' },
+                  email: { type: 'string' },
+                  profileImage: { type: 'string', nullable: true },
+                  inviteStatus: { type: 'string' },
+                  slotNumber: { type: 'number', nullable: true },
+                  isCreator: { type: 'boolean' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not a participant' })
+  @ApiResponse({ status: 404, description: 'Esusu not found' })
+  async getWaitingRoomDetails(
+    @CurrentUser() user: { userId: string },
+    @Param('esusuId') esusuId: string,
+  ) {
+    return this.esusuService.getWaitingRoomDetails(user.userId, esusuId);
+  }
+
   @Post()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

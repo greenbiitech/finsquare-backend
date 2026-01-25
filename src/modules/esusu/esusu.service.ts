@@ -1260,4 +1260,92 @@ export class EsusuService {
       },
     };
   }
+
+  /**
+   * Get waiting room details for a member
+   */
+  async getWaitingRoomDetails(userId: string, esusuId: string) {
+    // Get the Esusu
+    const esusu = await this.prisma.esusu.findUnique({
+      where: { id: esusuId },
+    });
+
+    if (!esusu) {
+      throw new NotFoundException('Esusu not found');
+    }
+
+    // Check if user is a participant
+    const participation = await this.prisma.esusuParticipant.findUnique({
+      where: {
+        esusuId_userId: { esusuId, userId },
+      },
+    });
+
+    if (!participation) {
+      throw new ForbiddenException('You are not a participant in this Esusu');
+    }
+
+    // Get all participants with their user details
+    const allParticipants = await this.prisma.esusuParticipant.findMany({
+      where: { esusuId },
+    });
+
+    // Fetch user details for all participants
+    const participantUserIds = allParticipants.map((p) => p.userId);
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: participantUserIds } },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        photo: true,
+      },
+    });
+
+    // Create a map for quick lookup
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    // Format participants list
+    const participants = allParticipants.map((p) => {
+      const user = userMap.get(p.userId);
+      return {
+        id: p.userId,
+        fullName: user?.fullName ?? 'Unknown',
+        email: user?.email ?? '',
+        profileImage: user?.photo,
+        inviteStatus: p.inviteStatus,
+        slotNumber: p.slotNumber,
+        isCreator: p.isCreator,
+      };
+    });
+
+    // Sort participants: creator first, then by slot number (if assigned), then by name
+    participants.sort((a, b) => {
+      if (a.isCreator) return -1;
+      if (b.isCreator) return 1;
+      if (a.slotNumber !== null && b.slotNumber !== null) {
+        return a.slotNumber - b.slotNumber;
+      }
+      if (a.slotNumber !== null) return -1;
+      if (b.slotNumber !== null) return 1;
+      return a.fullName.localeCompare(b.fullName);
+    });
+
+    return {
+      success: true,
+      data: {
+        id: esusu.id,
+        name: esusu.name,
+        description: esusu.description,
+        iconUrl: esusu.iconUrl,
+        contributionAmount: esusu.contributionAmount.toNumber(),
+        frequency: esusu.frequency,
+        targetMembers: esusu.numberOfParticipants,
+        startDate: esusu.collectionDate,
+        status: esusu.status,
+        payoutOrderType: esusu.payoutOrderType,
+        participants,
+      },
+    };
+  }
 }
