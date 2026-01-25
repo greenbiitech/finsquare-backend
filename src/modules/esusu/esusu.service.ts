@@ -1249,8 +1249,20 @@ export class EsusuService {
     }
 
     // Check if participant has already accepted the invitation
+    // Auto-accept if creator (for backwards compatibility with existing Esusus)
     if (participation.inviteStatus !== EsusuInviteStatus.ACCEPTED) {
-      throw new BadRequestException('You must accept the invitation before selecting a slot');
+      if (participation.isCreator) {
+        // Auto-accept the creator
+        await this.prisma.esusuParticipant.update({
+          where: { id: participation.id },
+          data: {
+            inviteStatus: EsusuInviteStatus.ACCEPTED,
+            respondedAt: new Date(),
+          },
+        });
+      } else {
+        throw new BadRequestException('You must accept the invitation before selecting a slot');
+      }
     }
 
     // Check if user already has a slot
