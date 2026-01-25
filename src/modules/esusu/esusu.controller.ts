@@ -4,6 +4,7 @@ import {
   Get,
   Body,
   Param,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -12,6 +13,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
   ApiParam,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { EsusuService } from './esusu.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -91,6 +93,67 @@ export class EsusuController {
     @Param('communityId') communityId: string,
   ) {
     return this.esusuService.getCommunityMembersForEsusu(user.userId, communityId);
+  }
+
+  @Get('hub-count/:communityId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get Esusu count for Hub display',
+    description: 'Get Esusu count for the Hub screen. Admin sees all Esusus, Members see only their participations.',
+  })
+  @ApiParam({ name: 'communityId', description: 'Community ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Esusu count retrieved',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        data: {
+          type: 'object',
+          properties: {
+            total: { type: 'number' },
+            active: { type: 'number' },
+            pendingMembers: { type: 'number' },
+            pendingInvitation: { type: 'number', description: 'Only for members' },
+            isAdmin: { type: 'boolean' },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not a member' })
+  async getHubCount(
+    @CurrentUser() user: { userId: string },
+    @Param('communityId') communityId: string,
+  ) {
+    return this.esusuService.getHubCount(user.userId, communityId);
+  }
+
+  @Get('list/:communityId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get Esusu list',
+    description: 'Get list of Esusus for the Esusu List page. Admin sees all Esusus, Members see only their participations.',
+  })
+  @ApiParam({ name: 'communityId', description: 'Community ID' })
+  @ApiQuery({ name: 'archived', required: false, type: Boolean, description: 'Get archived (completed/cancelled) Esusus instead of active ones' })
+  @ApiResponse({
+    status: 200,
+    description: 'Esusu list retrieved',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not a member' })
+  async getEsusuList(
+    @CurrentUser() user: { userId: string },
+    @Param('communityId') communityId: string,
+    @Query('archived') archived?: string,
+  ) {
+    const isArchived = archived === 'true';
+    return this.esusuService.getEsusuList(user.userId, communityId, isArchived);
   }
 
   @Post()

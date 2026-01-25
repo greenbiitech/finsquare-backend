@@ -466,6 +466,333 @@ export class EsusuService {
   }
 
   /**
+   * Get Esusu count for Hub display
+   * Admin: sees all Esusus in the community
+   * Member: sees only Esusus they're participating in
+   */
+  async getHubCount(userId: string, communityId: string) {
+    // Get user's role in community
+    const membership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId, communityId },
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenException('You are not a member of this community');
+    }
+
+    const isAdmin = membership.role === CommunityRole.ADMIN;
+
+    if (isAdmin) {
+      // Admin sees all Esusus in the community (except completed/cancelled)
+      const counts = await this.prisma.esusu.groupBy({
+        by: ['status'],
+        where: {
+          communityId,
+          status: {
+            notIn: [EsusuStatus.COMPLETED, EsusuStatus.CANCELLED],
+          },
+        },
+        _count: true,
+      });
+
+      let total = 0;
+      let active = 0;
+      let pendingMembers = 0;
+
+      for (const item of counts) {
+        total += item._count;
+        if (item.status === EsusuStatus.ACTIVE) {
+          active += item._count;
+        } else if (item.status === EsusuStatus.PENDING_MEMBERS) {
+          pendingMembers += item._count;
+        }
+      }
+
+      return {
+        success: true,
+        data: {
+          total,
+          active,
+          pendingMembers,
+          isAdmin: true,
+        },
+      };
+    } else {
+      // Member sees only Esusus they're part of
+      const participations = await this.prisma.esusuParticipant.findMany({
+        where: {
+          userId,
+          esusu: {
+            communityId,
+            status: {
+              notIn: [EsusuStatus.COMPLETED, EsusuStatus.CANCELLED],
+            },
+          },
+        },
+        include: {
+          esusu: {
+            select: {
+              status: true,
+            },
+          },
+        },
+      });
+
+      let total = 0;
+      let active = 0;
+      let pendingMembers = 0;
+      let pendingInvitation = 0;
+
+      for (const p of participations) {
+        total++;
+        if (p.inviteStatus === EsusuInviteStatus.INVITED) {
+          pendingInvitation++;
+        } else if (p.esusu.status === EsusuStatus.ACTIVE) {
+          active++;
+        } else if (p.esusu.status === EsusuStatus.PENDING_MEMBERS) {
+          pendingMembers++;
+        }
+      }
+
+      return {
+        success: true,
+        data: {
+          total,
+          active,
+          pendingMembers,
+          pendingInvitation,
+          isAdmin: false,
+        },
+      };
+    }
+  }
+
+  /**
+   * Get Esusu list for the Esusu List page
+   * Admin: sees all Esusus in the community
+   * Member: sees only Esusus they're participating in
+   */
+  async getEsusuList(userId: string, communityId: string, archived: boolean = false) {
+    // Get user's role in community
+    const membership = await this.prisma.membership.findUnique({
+      where: {
+        userId_communityId: { userId, communityId },
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenException('You are not a member of this community');
+    }
+
+    const isAdmin = membership.role === CommunityRole.ADMIN;
+
+    // Define status filter based on archived flag
+    const activeStatuses = [
+      EsusuStatus.PENDING_MEMBERS,
+      EsusuStatus.READY_TO_START,
+      EsusuStatus.ACTIVE,
+      EsusuStatus.PAUSED,
+    ];
+    const archivedStatuses = [EsusuStatus.COMPLETED, EsusuStatus.CANCELLED];
+
+    const statusFilter = archived ? archivedStatuses : activeStatuses;
+
+    if (isAdmin) {
+      // Admin sees all Esusus in the community
+      const esusus = await this.prisma.esusu.findMany({
+        where: {
+          communityId,
+          status: { in: statusFilter },
+        },
+        include: {
+          participants: {
+            select: {
+              inviteStatus: true,
+            },
+          },
+          cycles: {
+            where: {
+              status: { in: ['ACTIVE', 'UPCOMING'] },
+            },
+            orderBy: { cycleNumber: 'asc' },
+            take: 1,
+            select: {
+              payoutDate: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      // Get creator names
+      const creatorIds = [...new Set(esusus.map((e) => e.creatorId))];
+      const creators = await this.prisma.user.findMany({
+        where: { id: { in: creatorIds } },
+        select: { id: true, fullName: true },
+      });
+      const creatorMap = new Map(creators.map((c) => [c.id, c.fullName]));
+
+      const result = esusus.map((esusu) => {
+        const acceptedCount = esusu.participants.filter(
+          (p) => p.inviteStatus === EsusuInviteStatus.ACCEPTED,
+        ).length;
+        const pendingCount = esusu.participants.filter(
+          (p) => p.inviteStatus === EsusuInviteStatus.INVITED,
+        ).length;
+
+        // Get next payout date from cycles
+        const nextPayoutDate = esusu.cycles[0]?.payoutDate || null;
+
+        // Calculate days until payout for active Esusus
+        let daysUntilPayout: number | null = null;
+        if (esusu.status === EsusuStatus.ACTIVE && nextPayoutDate) {
+          const now = new Date();
+          const payoutDate = new Date(nextPayoutDate);
+          daysUntilPayout = Math.ceil(
+            (payoutDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+          );
+          if (daysUntilPayout < 0) daysUntilPayout = 0;
+        }
+
+        // Calculate progress
+        const progress =
+          esusu.numberOfParticipants > 0
+            ? esusu.currentCycle / esusu.numberOfParticipants
+            : 0;
+
+        return {
+          id: esusu.id,
+          name: esusu.name,
+          status: esusu.status,
+          iconUrl: esusu.iconUrl,
+          contributionAmount: Number(esusu.contributionAmount),
+          frequency: esusu.frequency,
+          numberOfParticipants: esusu.numberOfParticipants,
+          currentCycle: esusu.currentCycle,
+          totalCycles: esusu.numberOfParticipants,
+          nextPayoutDate,
+          daysUntilPayout,
+          progress,
+          acceptedCount,
+          pendingCount,
+          participationDeadline: esusu.participationDeadline,
+          isCreator: esusu.creatorId === userId,
+          creatorName: creatorMap.get(esusu.creatorId) || 'Unknown',
+        };
+      });
+
+      return {
+        success: true,
+        data: {
+          esusus: result,
+          isAdmin: true,
+        },
+      };
+    } else {
+      // Member sees only Esusus they're part of
+      const participations = await this.prisma.esusuParticipant.findMany({
+        where: {
+          userId,
+          esusu: {
+            communityId,
+            status: { in: statusFilter },
+          },
+        },
+        include: {
+          esusu: {
+            include: {
+              participants: {
+                select: {
+                  inviteStatus: true,
+                },
+              },
+              cycles: {
+                where: {
+                  status: { in: ['ACTIVE', 'UPCOMING'] },
+                },
+                orderBy: { cycleNumber: 'asc' },
+                take: 1,
+                select: {
+                  payoutDate: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      // Get creator names
+      const creatorIds = [...new Set(participations.map((p) => p.esusu.creatorId))];
+      const creators = await this.prisma.user.findMany({
+        where: { id: { in: creatorIds } },
+        select: { id: true, fullName: true },
+      });
+      const creatorMap = new Map(creators.map((c) => [c.id, c.fullName]));
+
+      const result = participations.map((p) => {
+        const esusu = p.esusu;
+        const acceptedCount = esusu.participants.filter(
+          (part) => part.inviteStatus === EsusuInviteStatus.ACCEPTED,
+        ).length;
+
+        // Get next payout date from cycles
+        const nextPayoutDate = esusu.cycles[0]?.payoutDate || null;
+
+        // Calculate days until payout for active Esusus
+        let daysUntilPayout: number | null = null;
+        if (esusu.status === EsusuStatus.ACTIVE && nextPayoutDate) {
+          const now = new Date();
+          const payoutDate = new Date(nextPayoutDate);
+          daysUntilPayout = Math.ceil(
+            (payoutDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+          );
+          if (daysUntilPayout < 0) daysUntilPayout = 0;
+        }
+
+        // Calculate progress
+        const progress =
+          esusu.numberOfParticipants > 0
+            ? esusu.currentCycle / esusu.numberOfParticipants
+            : 0;
+
+        return {
+          id: esusu.id,
+          name: esusu.name,
+          status: esusu.status,
+          inviteStatus: p.inviteStatus,
+          slotNumber: p.slotNumber,
+          iconUrl: esusu.iconUrl,
+          contributionAmount: Number(esusu.contributionAmount),
+          frequency: esusu.frequency,
+          numberOfParticipants: esusu.numberOfParticipants,
+          currentCycle: esusu.currentCycle,
+          totalCycles: esusu.numberOfParticipants,
+          nextPayoutDate,
+          daysUntilPayout,
+          progress,
+          acceptedCount,
+          participationDeadline: esusu.participationDeadline,
+          isCreator: esusu.creatorId === userId,
+          creatorName: creatorMap.get(esusu.creatorId) || 'Unknown',
+        };
+      });
+
+      return {
+        success: true,
+        data: {
+          esusus: result,
+          isAdmin: false,
+        },
+      };
+    }
+  }
+
+  /**
    * Get community members for participant selection
    * Returns all members except already filtered ones
    */
