@@ -320,6 +320,7 @@ export class EsusuService {
       dto.contributionAmount,
       frequencyMap[dto.frequency],
       deadline,
+      dto.numberOfParticipants,
     );
 
     // 11. Calculate summary for response
@@ -371,6 +372,7 @@ export class EsusuService {
     contributionAmount: number,
     frequency: PaymentFrequency,
     deadline: Date,
+    numberOfParticipants: number,
   ) {
     const frequencyText = {
       [PaymentFrequency.WEEKLY]: 'weekly',
@@ -378,55 +380,87 @@ export class EsusuService {
       [PaymentFrequency.QUARTERLY]: 'quarterly',
     };
 
+    const formattedDeadline = deadline.toLocaleDateString('en-NG', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    const formattedAmount = new Intl.NumberFormat('en-NG', {
+      style: 'currency',
+      currency: 'NGN',
+    }).format(contributionAmount);
+
     for (const membership of memberships) {
-      // Skip the creator (they don't need an invite notification for their own Esusu)
-      if (membership.user.id === creatorId) {
-        continue;
-      }
+      const isCreator = membership.user.id === creatorId;
 
-      // Push notification
-      this.notificationsService.sendToUser(
-        membership.user.id,
-        "You've been invited to an Esusu",
-        `${creatorName} invited you to join '${esusuName}'. Tap to view details.`,
-        {
-          type: 'esusu_invite',
-          esusuId,
-          esusuName,
-          communityName,
-          creatorName,
-        },
-      ).catch((err) => console.error('Failed to send Esusu invite push notification:', err));
+      if (isCreator) {
+        // Send confirmation notification to the creator
+        this.notificationsService.sendToUser(
+          membership.user.id,
+          'Esusu Created Successfully',
+          `Your Esusu "${esusuName}" has been created. Invitations have been sent to ${numberOfParticipants - 1} members.`,
+          {
+            type: 'esusu_created',
+            esusuId,
+            esusuName,
+            communityName,
+          },
+        ).catch((err) => console.error('Failed to send Esusu creation push notification:', err));
 
-      // Email notification
-      if (membership.user.email) {
-        const formattedDeadline = deadline.toLocaleDateString('en-NG', {
-          weekday: 'long',
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        });
+        // Send confirmation email to the creator
+        if (membership.user.email) {
+          this.zeptomailService.sendEmail(
+            membership.user.email,
+            `Your Esusu "${esusuName}" has been created`,
+            `
+              <p>Hello ${membership.user.fullName},</p>
+              <p>Your Esusu <strong>"${esusuName}"</strong> has been successfully created in the ${communityName} community.</p>
+              <p><strong>Details:</strong></p>
+              <ul>
+                <li>Contribution: ${formattedAmount} ${frequencyText[frequency]}</li>
+                <li>Participants: ${numberOfParticipants}</li>
+                <li>Response Deadline: ${formattedDeadline}</li>
+              </ul>
+              <p>Invitations have been sent to all selected participants. You'll be notified as members respond to the invitation.</p>
+              <p>Best regards,<br>FinSquare Team</p>
+            `,
+          ).catch((err) => console.error('Failed to send Esusu creation email:', err));
+        }
+      } else {
+        // Send invite notification to participants
+        this.notificationsService.sendToUser(
+          membership.user.id,
+          "You've been invited to an Esusu",
+          `${creatorName} invited you to join '${esusuName}'. Tap to view details.`,
+          {
+            type: 'esusu_invite',
+            esusuId,
+            esusuName,
+            communityName,
+            creatorName,
+          },
+        ).catch((err) => console.error('Failed to send Esusu invite push notification:', err));
 
-        const formattedAmount = new Intl.NumberFormat('en-NG', {
-          style: 'currency',
-          currency: 'NGN',
-        }).format(contributionAmount);
-
-        this.zeptomailService.sendEmail(
-          membership.user.email,
-          `You've been invited to join an Esusu on FinSquare`,
-          `
-            <p>Hello ${membership.user.fullName},</p>
-            <p><strong>${creatorName}</strong> has invited you to join <strong>"${esusuName}"</strong> in the ${communityName} community on FinSquare.</p>
-            <p><strong>Details:</strong></p>
-            <ul>
-              <li>Contribution: ${formattedAmount} ${frequencyText[frequency]}</li>
-              <li>Response Deadline: ${formattedDeadline}</li>
-            </ul>
-            <p>Open the FinSquare app to view the full details and respond to this invitation.</p>
-            <p>Best regards,<br>FinSquare Team</p>
-          `,
-        ).catch((err) => console.error('Failed to send Esusu invite email:', err));
+        // Email notification
+        if (membership.user.email) {
+          this.zeptomailService.sendEmail(
+            membership.user.email,
+            `You've been invited to join an Esusu on FinSquare`,
+            `
+              <p>Hello ${membership.user.fullName},</p>
+              <p><strong>${creatorName}</strong> has invited you to join <strong>"${esusuName}"</strong> in the ${communityName} community on FinSquare.</p>
+              <p><strong>Details:</strong></p>
+              <ul>
+                <li>Contribution: ${formattedAmount} ${frequencyText[frequency]}</li>
+                <li>Response Deadline: ${formattedDeadline}</li>
+              </ul>
+              <p>Open the FinSquare app to view the full details and respond to this invitation.</p>
+              <p>Best regards,<br>FinSquare Team</p>
+            `,
+          ).catch((err) => console.error('Failed to send Esusu invite email:', err));
+        }
       }
     }
   }
