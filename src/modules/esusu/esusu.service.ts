@@ -1379,6 +1379,17 @@ export class EsusuService {
       throw new ForbiddenException('You are not authorized to view this Esusu');
     }
 
+    // Auto-accept creator if they're a participant but not yet accepted (backwards compatibility)
+    if (participation && participation.isCreator && participation.inviteStatus !== EsusuInviteStatus.ACCEPTED) {
+      await this.prisma.esusuParticipant.update({
+        where: { id: participation.id },
+        data: {
+          inviteStatus: EsusuInviteStatus.ACCEPTED,
+          respondedAt: new Date(),
+        },
+      });
+    }
+
     // Get all participants with their user details
     const allParticipants = await this.prisma.esusuParticipant.findMany({
       where: { esusuId },
