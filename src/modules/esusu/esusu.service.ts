@@ -851,4 +851,232 @@ export class EsusuService {
       },
     };
   }
+
+  /**
+   * Get Esusu invitation details for a member to review
+   */
+  async getInvitationDetails(userId: string, esusuId: string) {
+    // Get the Esusu
+    const esusu = await this.prisma.esusu.findUnique({
+      where: { id: esusuId },
+    });
+
+    if (!esusu) {
+      throw new NotFoundException('Esusu not found');
+    }
+
+    // Check if user is invited to this Esusu
+    const participation = await this.prisma.esusuParticipant.findUnique({
+      where: {
+        esusuId_userId: { esusuId, userId },
+      },
+    });
+
+    if (!participation) {
+      throw new ForbiddenException('You are not invited to this Esusu');
+    }
+
+    // Get creator details
+    const creator = await this.prisma.user.findUnique({
+      where: { id: esusu.creatorId },
+      select: { fullName: true },
+    });
+
+    // Calculate financial details
+    const totalAmountPerCycle = esusu.numberOfParticipants * Number(esusu.contributionAmount);
+    const platformFeePercent = 1.5;
+    const platformFee = totalAmountPerCycle * (platformFeePercent / 100);
+    const commission = esusu.takeCommission && esusu.commissionPercentage
+      ? totalAmountPerCycle * (esusu.commissionPercentage / 100)
+      : 0;
+    const payout = totalAmountPerCycle - platformFee - commission;
+
+    // Generate payout schedule based on frequency and collection date
+    const payoutSchedule = this.generatePayoutSchedule(
+      new Date(esusu.collectionDate),
+      esusu.frequency,
+      esusu.numberOfParticipants,
+    );
+
+    // Map frequency to display string
+    const frequencyMap: Record<PaymentFrequency, string> = {
+      [PaymentFrequency.WEEKLY]: 'Weekly',
+      [PaymentFrequency.MONTHLY]: 'Monthly',
+      [PaymentFrequency.QUARTERLY]: 'Quarterly',
+    };
+
+    return {
+      success: true,
+      data: {
+        id: esusu.id,
+        name: esusu.name,
+        description: esusu.description,
+        iconUrl: esusu.iconUrl,
+        contributionAmount: Number(esusu.contributionAmount),
+        frequency: frequencyMap[esusu.frequency],
+        targetMembers: esusu.numberOfParticipants,
+        startDate: esusu.collectionDate,
+        totalAmountPerCycle,
+        commission,
+        platformFeePercent,
+        platformFee,
+        payout,
+        payoutSchedule,
+        creatorName: creator?.fullName || 'Unknown',
+        participationDeadline: esusu.participationDeadline,
+      },
+    };
+  }
+
+  /**
+   * Generate payout schedule based on collection date and frequency
+   */
+  private generatePayoutSchedule(
+    startDate: Date,
+    frequency: PaymentFrequency,
+    numberOfCycles: number,
+  ): { cycleNumber: number; payoutDate: Date }[] {
+    const schedule: { cycleNumber: number; payoutDate: Date }[] = [];
+    let currentDate = new Date(startDate);
+
+    for (let i = 0; i < numberOfCycles; i++) {
+      schedule.push({
+        cycleNumber: i + 1,
+        payoutDate: new Date(currentDate),
+      });
+
+      // Move to next cycle based on frequency
+      switch (frequency) {
+        case PaymentFrequency.WEEKLY:
+          currentDate.setDate(currentDate.getDate() + 7);
+          break;
+        case PaymentFrequency.MONTHLY:
+          currentDate.setMonth(currentDate.getMonth() + 1);
+          break;
+        case PaymentFrequency.QUARTERLY:
+          currentDate.setMonth(currentDate.getMonth() + 3);
+          break;
+      }
+    }
+
+    return schedule;
+  }
+
+  /**
+   * Respond to Esusu invitation (accept or decline)
+   */
+  async respondToInvitation(userId: string, esusuId: string, accept: boolean) {
+    // Get the Esusu
+    const esusu = await this.prisma.esusu.findUnique({
+      where: { id: esusuId },
+    });
+
+    if (!esusu) {
+      throw new NotFoundException('Esusu not found');
+    }
+
+    // Get creator details
+    const creator = await this.prisma.user.findUnique({
+      where: { id: esusu.creatorId },
+      select: { id: true, fullName: true, email: true },
+    });
+
+    // Check if user is invited
+    const participation = await this.prisma.esusuParticipant.findUnique({
+      where: {
+        esusuId_userId: { esusuId, userId },
+      },
+    });
+
+    if (!participation) {
+      throw new ForbiddenException('You are not invited to this Esusu');
+    }
+
+    // Get participant user details
+    const participantUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, fullName: true, email: true },
+    });
+
+    // Check if already responded
+    if (participation.inviteStatus !== EsusuInviteStatus.INVITED) {
+      throw new BadRequestException('You have already responded to this invitation');
+    }
+
+    // Check if deadline has passed
+    if (new Date() > esusu.participationDeadline) {
+      throw new BadRequestException('The participation deadline has passed');
+    }
+
+    // Check if Esusu is still accepting responses
+    if (esusu.status !== EsusuStatus.PENDING_MEMBERS) {
+      throw new BadRequestException('This Esusu is no longer accepting responses');
+    }
+
+    // Update participation status
+    const newStatus = accept ? EsusuInviteStatus.ACCEPTED : EsusuInviteStatus.DECLINED;
+
+    await this.prisma.esusuParticipant.update({
+      where: {
+        esusuId_userId: { esusuId, userId },
+      },
+      data: {
+        inviteStatus: newStatus,
+        respondedAt: new Date(),
+      },
+    });
+
+    // If accepted, check if all members have accepted -> update Esusu status
+    if (accept) {
+      const allParticipants = await this.prisma.esusuParticipant.findMany({
+        where: { esusuId },
+      });
+
+      const allAccepted = allParticipants.every(
+        (p) => p.inviteStatus === EsusuInviteStatus.ACCEPTED,
+      );
+
+      if (allAccepted && creator) {
+        await this.prisma.esusu.update({
+          where: { id: esusuId },
+          data: { status: EsusuStatus.READY_TO_START },
+        });
+
+        // Notify creator that all members have accepted
+        this.notificationsService.sendToUser(
+          creator.id,
+          'All Members Accepted!',
+          `All members have accepted the invitation for "${esusu.name}". The Esusu is ready to start!`,
+          {
+            type: 'esusu_ready',
+            esusuId,
+            esusuName: esusu.name,
+          },
+        ).catch((err) => console.error('Failed to send ready notification:', err));
+      }
+    }
+
+    // Notify creator about the response
+    if (creator && participantUser) {
+      const actionText = accept ? 'accepted' : 'declined';
+      this.notificationsService.sendToUser(
+        creator.id,
+        `Esusu Invitation ${accept ? 'Accepted' : 'Declined'}`,
+        `${participantUser.fullName} has ${actionText} the invitation for "${esusu.name}".`,
+        {
+          type: accept ? 'esusu_invite_accepted' : 'esusu_invite_declined',
+          esusuId,
+          esusuName: esusu.name,
+          memberName: participantUser.fullName,
+        },
+      ).catch((err) => console.error('Failed to send response notification:', err));
+    }
+
+    return {
+      success: true,
+      message: accept
+        ? 'You have successfully joined this Esusu'
+        : 'You have declined this invitation',
+    };
+  }
 }

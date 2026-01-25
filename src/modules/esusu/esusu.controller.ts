@@ -18,7 +18,7 @@ import {
 import { EsusuService } from './esusu.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { CreateEsusuDto } from './dto';
+import { CreateEsusuDto, RespondInvitationDto } from './dto';
 
 @ApiTags('Esusu')
 @Controller('api/v1/esusu')
@@ -154,6 +154,95 @@ export class EsusuController {
   ) {
     const isArchived = archived === 'true';
     return this.esusuService.getEsusuList(user.userId, communityId, isArchived);
+  }
+
+  @Get(':esusuId/invitation')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get Esusu invitation details',
+    description: 'Get detailed information about an Esusu invitation for a member to review before accepting or declining.',
+  })
+  @ApiParam({ name: 'esusuId', description: 'Esusu ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Invitation details retrieved',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        data: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            description: { type: 'string', nullable: true },
+            iconUrl: { type: 'string', nullable: true },
+            contributionAmount: { type: 'number' },
+            frequency: { type: 'string' },
+            targetMembers: { type: 'number' },
+            startDate: { type: 'string', format: 'date-time' },
+            totalAmountPerCycle: { type: 'number' },
+            commission: { type: 'number' },
+            platformFeePercent: { type: 'number' },
+            platformFee: { type: 'number' },
+            payout: { type: 'number' },
+            payoutSchedule: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  cycleNumber: { type: 'number' },
+                  payoutDate: { type: 'string', format: 'date-time' },
+                },
+              },
+            },
+            creatorName: { type: 'string' },
+            participationDeadline: { type: 'string', format: 'date-time' },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not invited to this Esusu' })
+  @ApiResponse({ status: 404, description: 'Esusu not found' })
+  async getInvitationDetails(
+    @CurrentUser() user: { userId: string },
+    @Param('esusuId') esusuId: string,
+  ) {
+    return this.esusuService.getInvitationDetails(user.userId, esusuId);
+  }
+
+  @Post(':esusuId/respond')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Respond to Esusu invitation',
+    description: 'Accept or decline an Esusu invitation. Once accepted, the member becomes a participant.',
+  })
+  @ApiParam({ name: 'esusuId', description: 'Esusu ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Invitation response recorded',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Bad request - invalid response or deadline passed' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not invited to this Esusu' })
+  @ApiResponse({ status: 404, description: 'Esusu not found' })
+  async respondToInvitation(
+    @CurrentUser() user: { userId: string },
+    @Param('esusuId') esusuId: string,
+    @Body() dto: RespondInvitationDto,
+  ) {
+    return this.esusuService.respondToInvitation(user.userId, esusuId, dto.accept);
   }
 
   @Post()
