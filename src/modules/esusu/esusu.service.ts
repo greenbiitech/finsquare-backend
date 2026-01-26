@@ -1011,6 +1011,11 @@ export class EsusuService {
       throw new ForbiddenException('You are not invited to this Esusu');
     }
 
+    // Creator cannot decline their own Esusu - they must cancel it instead
+    if (!accept && participation.isCreator) {
+      throw new BadRequestException('As the creator, you cannot decline. You can cancel the Esusu instead.');
+    }
+
     // Get participant user details
     const participantUser = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -1045,56 +1050,55 @@ export class EsusuService {
       },
     });
 
-    // If accepted, check if all members have accepted -> update Esusu status
-    // For FCFS payout order, don't set READY_TO_START here - wait until all members select slots
-    if (accept && esusu.payoutOrderType === PayoutOrderType.RANDOM) {
-      const allParticipants = await this.prisma.esusuParticipant.findMany({
-        where: { esusuId },
-      });
-
-      const allAccepted = allParticipants.every(
-        (p) => p.inviteStatus === EsusuInviteStatus.ACCEPTED,
-      );
-
-      if (allAccepted && creator) {
-        await this.prisma.esusu.update({
-          where: { id: esusuId },
-          data: { status: EsusuStatus.READY_TO_START },
+    // Handle ACCEPT flow
+    if (accept) {
+      // For FCFS payout order, don't set READY_TO_START here - wait until all members select slots
+      if (esusu.payoutOrderType === PayoutOrderType.RANDOM) {
+        const allParticipants = await this.prisma.esusuParticipant.findMany({
+          where: { esusuId },
         });
 
-        // Notify creator that all members have accepted
+        const allAccepted = allParticipants.every(
+          (p) => p.inviteStatus === EsusuInviteStatus.ACCEPTED,
+        );
+
+        if (allAccepted && creator) {
+          await this.prisma.esusu.update({
+            where: { id: esusuId },
+            data: { status: EsusuStatus.READY_TO_START },
+          });
+
+          // Notify creator that all members have accepted
+          this.notificationsService.sendToUser(
+            creator.id,
+            'All Members Accepted!',
+            `All members have accepted the invitation for "${esusu.name}". The Esusu is ready to start!`,
+            {
+              type: 'esusu_ready',
+              esusuId,
+              esusuName: esusu.name,
+            },
+          ).catch((err) => console.error('Failed to send ready notification:', err));
+        }
+      }
+
+      // Notify creator about the acceptance
+      if (creator && participantUser) {
         this.notificationsService.sendToUser(
           creator.id,
-          'All Members Accepted!',
-          `All members have accepted the invitation for "${esusu.name}". The Esusu is ready to start!`,
+          'Esusu Invitation Accepted',
+          `${participantUser.fullName} has accepted the invitation for "${esusu.name}".`,
           {
-            type: 'esusu_ready',
+            type: 'esusu_invite_accepted',
             esusuId,
             esusuName: esusu.name,
+            memberName: participantUser.fullName,
           },
-        ).catch((err) => console.error('Failed to send ready notification:', err));
+        ).catch((err) => console.error('Failed to send accept notification:', err));
       }
-    }
 
-    // Notify creator about the response
-    if (creator && participantUser) {
-      const actionText = accept ? 'accepted' : 'declined';
-      this.notificationsService.sendToUser(
-        creator.id,
-        `Esusu Invitation ${accept ? 'Accepted' : 'Declined'}`,
-        `${participantUser.fullName} has ${actionText} the invitation for "${esusu.name}".`,
-        {
-          type: accept ? 'esusu_invite_accepted' : 'esusu_invite_declined',
-          esusuId,
-          esusuName: esusu.name,
-          memberName: participantUser.fullName,
-        },
-      ).catch((err) => console.error('Failed to send response notification:', err));
-    }
-
-    // Send confirmation notification and email to the member
-    if (participantUser) {
-      if (accept) {
+      // Send confirmation to member
+      if (participantUser) {
         // Push notification to member
         this.notificationsService.sendToUser(
           participantUser.id,
@@ -1128,33 +1132,193 @@ export class EsusuService {
             </div>
           `,
         ).catch((err) => console.error('Failed to send member join email:', err));
-      } else {
-        // Push notification for decline confirmation
+      }
+
+      return {
+        success: true,
+        message: 'You have successfully joined this Esusu',
+        data: {
+          esusuId: esusu.id,
+          esusuName: esusu.name,
+          payoutOrderType: esusu.payoutOrderType,
+        },
+      };
+    }
+
+    // Handle DECLINE flow
+    // Check remaining eligible participants (ACCEPTED + INVITED, excluding the one who just declined)
+    const remainingCount = await this.prisma.esusuParticipant.count({
+      where: {
+        esusuId,
+        inviteStatus: { in: [EsusuInviteStatus.ACCEPTED, EsusuInviteStatus.INVITED] },
+      },
+    });
+
+    let esusuCancelled = false;
+
+    // Minimum 3 participants required - if remaining < 3, cancel Esusu
+    if (remainingCount < 3) {
+      esusuCancelled = true;
+
+      // Cancel the Esusu
+      await this.prisma.esusu.update({
+        where: { id: esusuId },
+        data: {
+          status: EsusuStatus.CANCELLED,
+        },
+      });
+
+      // Get community name for notifications
+      const community = await this.prisma.community.findUnique({
+        where: { id: esusu.communityId },
+        select: { name: true },
+      });
+
+      // Notify admin about cancellation
+      if (creator) {
         this.notificationsService.sendToUser(
-          participantUser.id,
-          'Esusu Invitation Declined',
-          `You have declined the invitation to join "${esusu.name}".`,
+          creator.id,
+          'Esusu Cancelled',
+          `"${esusu.name}" has been cancelled due to insufficient participants after ${participantUser?.fullName || 'a member'} declined.`,
           {
-            type: 'esusu_declined',
+            type: 'esusu_cancelled',
             esusuId,
             esusuName: esusu.name,
           },
-        ).catch((err) => console.error('Failed to send member decline notification:', err));
+        ).catch((err) => console.error('Failed to send cancellation notification to creator:', err));
+
+        // Email to admin
+        if (creator.email) {
+          this.zeptomailService.sendEmail(
+            creator.email,
+            `Esusu Cancelled - ${esusu.name}`,
+            `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #E53E3E;">Esusu Cancelled</h2>
+                <p>Hi ${creator.fullName},</p>
+                <p>Unfortunately, your Esusu "<strong>${esusu.name}</strong>" has been cancelled due to insufficient participants.</p>
+                <p><strong>${participantUser?.fullName || 'A member'}</strong> declined the invitation, leaving fewer than 3 eligible participants.</p>
+                <p>Esusu requires a minimum of 3 participants to function.</p>
+                <p>You can create a new Esusu anytime from the FinSquare app.</p>
+                <p>Best regards,<br>The FinSquare Team</p>
+              </div>
+            `,
+          ).catch((err) => console.error('Failed to send cancellation email to creator:', err));
+        }
       }
+
+      // Notify remaining ACCEPTED participants about cancellation
+      const acceptedParticipants = await this.prisma.esusuParticipant.findMany({
+        where: {
+          esusuId,
+          inviteStatus: EsusuInviteStatus.ACCEPTED,
+          userId: { not: esusu.creatorId }, // Don't notify creator twice
+        },
+      });
+
+      const acceptedUserIds = acceptedParticipants.map((p) => p.userId);
+      const acceptedUsers = await this.prisma.user.findMany({
+        where: { id: { in: acceptedUserIds } },
+        select: { id: true, fullName: true, email: true },
+      });
+
+      for (const user of acceptedUsers) {
+        this.notificationsService.sendToUser(
+          user.id,
+          'Esusu Cancelled',
+          `"${esusu.name}" has been cancelled due to insufficient participants.`,
+          {
+            type: 'esusu_cancelled',
+            esusuId,
+            esusuName: esusu.name,
+          },
+        ).catch((err) => console.error('Failed to send cancellation notification to member:', err));
+
+        if (user.email) {
+          this.zeptomailService.sendEmail(
+            user.email,
+            `Esusu Cancelled - ${esusu.name}`,
+            `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #E53E3E;">Esusu Cancelled</h2>
+                <p>Hi ${user.fullName},</p>
+                <p>The Esusu "<strong>${esusu.name}</strong>" that you joined has been cancelled due to insufficient participants.</p>
+                <p>Esusu requires a minimum of 3 participants to function, and this threshold was not met.</p>
+                <p>Best regards,<br>The FinSquare Team</p>
+              </div>
+            `,
+          ).catch((err) => console.error('Failed to send cancellation email to member:', err));
+        }
+      }
+    } else {
+      // Esusu continues - just notify admin about the decline
+      if (creator && participantUser) {
+        // Push notification to admin
+        this.notificationsService.sendToUser(
+          creator.id,
+          `${esusu.name}`,
+          `${participantUser.fullName} declined the invitation`,
+          {
+            type: 'esusu_invite_declined',
+            esusuId,
+            esusuName: esusu.name,
+            memberName: participantUser.fullName,
+          },
+        ).catch((err) => console.error('Failed to send decline notification to creator:', err));
+
+        // Email notification to admin
+        if (creator.email) {
+          // Get current counts
+          const acceptedCount = await this.prisma.esusuParticipant.count({
+            where: { esusuId, inviteStatus: EsusuInviteStatus.ACCEPTED },
+          });
+          const pendingCount = await this.prisma.esusuParticipant.count({
+            where: { esusuId, inviteStatus: EsusuInviteStatus.INVITED },
+          });
+
+          this.zeptomailService.sendEmail(
+            creator.email,
+            `Member Declined - ${esusu.name}`,
+            `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #8B20E9;">Member Declined Invitation</h2>
+                <p>Hi ${creator.fullName},</p>
+                <p><strong>${participantUser.fullName}</strong> has declined your invitation to join "<strong>${esusu.name}</strong>".</p>
+                <div style="background-color: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
+                  <p style="margin: 8px 0;"><strong>Remaining Participants:</strong> ${remainingCount}</p>
+                  <p style="margin: 8px 0;"><strong>Accepted:</strong> ${acceptedCount}</p>
+                  <p style="margin: 8px 0;"><strong>Pending Response:</strong> ${pendingCount}</p>
+                </div>
+                <p>Best regards,<br>The FinSquare Team</p>
+              </div>
+            `,
+          ).catch((err) => console.error('Failed to send decline email to creator:', err));
+        }
+      }
+    }
+
+    // Confirmation notification to the declining member (no email needed)
+    if (participantUser) {
+      this.notificationsService.sendToUser(
+        participantUser.id,
+        'Esusu Invitation Declined',
+        `You have declined the invitation to join "${esusu.name}".`,
+        {
+          type: 'esusu_declined',
+          esusuId,
+          esusuName: esusu.name,
+        },
+      ).catch((err) => console.error('Failed to send decline confirmation to member:', err));
     }
 
     return {
       success: true,
-      message: accept
-        ? 'You have successfully joined this Esusu'
+      message: esusuCancelled
+        ? 'Invitation declined. Esusu has been cancelled due to insufficient participants.'
         : 'You have declined this invitation',
-      data: accept
-        ? {
-            esusuId: esusu.id,
-            esusuName: esusu.name,
-            payoutOrderType: esusu.payoutOrderType,
-          }
-        : null,
+      data: {
+        esusuCancelled,
+      },
     };
   }
 
