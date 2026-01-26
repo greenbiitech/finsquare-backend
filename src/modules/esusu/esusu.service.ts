@@ -1462,11 +1462,6 @@ export class EsusuService {
     // Get the Esusu
     const esusu = await this.prisma.esusu.findUnique({
       where: { id: esusuId },
-      include: {
-        community: {
-          select: { name: true },
-        },
-      },
     });
 
     if (!esusu) {
@@ -1478,20 +1473,18 @@ export class EsusuService {
       throw new ForbiddenException('Only the creator can send reminders');
     }
 
+    // Get community name
+    const community = await this.prisma.community.findUnique({
+      where: { id: esusu.communityId },
+      select: { name: true },
+    });
+    const communityName = community?.name || 'your community';
+
     // Get pending participants (those with INVITED status)
     const pendingParticipants = await this.prisma.esusuParticipant.findMany({
       where: {
         esusuId,
         inviteStatus: EsusuInviteStatus.INVITED,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-          },
-        },
       },
     });
 
@@ -1502,6 +1495,14 @@ export class EsusuService {
         data: { remindersSent: 0 },
       };
     }
+
+    // Get user details for pending participants
+    const userIds = pendingParticipants.map((p) => p.userId);
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, fullName: true, email: true },
+    });
+    const userMap = new Map(users.map((u) => [u.id, u]));
 
     // Get creator name
     const creator = await this.prisma.user.findUnique({
@@ -1520,29 +1521,32 @@ export class EsusuService {
     // Send reminders to each pending participant
     let remindersSent = 0;
     for (const participant of pendingParticipants) {
+      const user = userMap.get(participant.userId);
+      if (!user) continue;
+
       // Push notification
       this.notificationsService.sendToUser(
-        participant.user.id,
+        user.id,
         'Esusu Invitation Reminder',
         `${creatorName} is waiting for your response to join "${esusu.name}". Respond before ${deadline}.`,
         {
           type: 'esusu_reminder',
           esusuId,
           esusuName: esusu.name,
-          communityName: esusu.community.name,
+          communityName,
         },
       ).catch((err) => console.error('Failed to send reminder push notification:', err));
 
       // Email notification
-      if (participant.user.email) {
+      if (user.email) {
         this.zeptomailService.sendEmail(
-          participant.user.email,
+          user.email,
           `Reminder: Respond to Esusu Invitation - ${esusu.name}`,
           `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
               <h2 style="color: #8B20E9;">Esusu Invitation Reminder</h2>
-              <p>Hi ${participant.user.fullName},</p>
-              <p>${creatorName} is waiting for your response to join the Esusu "<strong>${esusu.name}</strong>" in the ${esusu.community.name} community.</p>
+              <p>Hi ${user.fullName},</p>
+              <p>${creatorName} is waiting for your response to join the Esusu "<strong>${esusu.name}</strong>" in the ${communityName} community.</p>
               <p><strong>Response Deadline:</strong> ${deadline}</p>
               <p>Open the FinSquare app to accept or decline this invitation.</p>
               <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #eee;">
