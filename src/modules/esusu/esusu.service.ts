@@ -218,10 +218,10 @@ export class EsusuService {
       throw new BadRequestException('Participation deadline must be in the future');
     }
 
-    // Check minimum 3-day buffer between deadline and collection date
-    const minBuffer = 3 * 24 * 60 * 60 * 1000; // 3 days in milliseconds
+    // Check minimum 24-hour buffer between deadline and collection date
+    const minBuffer = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
     if (collectionDate.getTime() - deadline.getTime() < minBuffer) {
-      throw new BadRequestException('Collection date must be at least 3 days after the deadline');
+      throw new BadRequestException('Collection date must be at least 24 hours after the deadline');
     }
 
     // 5. Validate participants count
