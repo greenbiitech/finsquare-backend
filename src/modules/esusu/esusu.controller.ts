@@ -383,6 +383,41 @@ export class EsusuController {
     return this.esusuService.getWaitingRoomDetails(user.userId, esusuId);
   }
 
+  @Post(':esusuId/remind')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Send reminder to pending participants',
+    description: 'Send push notification and email reminders to participants who have not yet responded to the invitation.',
+  })
+  @ApiParam({ name: 'esusuId', description: 'Esusu ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Reminders sent successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          properties: {
+            remindersSent: { type: 'number' },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not the creator' })
+  @ApiResponse({ status: 404, description: 'Esusu not found' })
+  async remindPendingParticipants(
+    @CurrentUser() user: { userId: string },
+    @Param('esusuId') esusuId: string,
+  ) {
+    return this.esusuService.remindPendingParticipants(user.userId, esusuId);
+  }
+
   @Post()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

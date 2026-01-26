@@ -1453,4 +1453,113 @@ export class EsusuService {
       },
     };
   }
+
+  /**
+   * Send reminders to pending participants
+   * Only the creator can send reminders
+   */
+  async remindPendingParticipants(userId: string, esusuId: string) {
+    // Get the Esusu
+    const esusu = await this.prisma.esusu.findUnique({
+      where: { id: esusuId },
+      include: {
+        community: {
+          select: { name: true },
+        },
+      },
+    });
+
+    if (!esusu) {
+      throw new NotFoundException('Esusu not found');
+    }
+
+    // Only creator can send reminders
+    if (esusu.creatorId !== userId) {
+      throw new ForbiddenException('Only the creator can send reminders');
+    }
+
+    // Get pending participants (those with INVITED status)
+    const pendingParticipants = await this.prisma.esusuParticipant.findMany({
+      where: {
+        esusuId,
+        inviteStatus: EsusuInviteStatus.INVITED,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    if (pendingParticipants.length === 0) {
+      return {
+        success: true,
+        message: 'No pending participants to remind',
+        data: { remindersSent: 0 },
+      };
+    }
+
+    // Get creator name
+    const creator = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { fullName: true },
+    });
+    const creatorName = creator?.fullName || 'The admin';
+
+    // Format deadline
+    const deadline = esusu.participationDeadline.toLocaleDateString('en-NG', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+
+    // Send reminders to each pending participant
+    let remindersSent = 0;
+    for (const participant of pendingParticipants) {
+      // Push notification
+      this.notificationsService.sendToUser(
+        participant.user.id,
+        'Esusu Invitation Reminder',
+        `${creatorName} is waiting for your response to join "${esusu.name}". Respond before ${deadline}.`,
+        {
+          type: 'esusu_reminder',
+          esusuId,
+          esusuName: esusu.name,
+          communityName: esusu.community.name,
+        },
+      ).catch((err) => console.error('Failed to send reminder push notification:', err));
+
+      // Email notification
+      if (participant.user.email) {
+        this.zeptomailService.sendEmail(
+          participant.user.email,
+          `Reminder: Respond to Esusu Invitation - ${esusu.name}`,
+          `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #8B20E9;">Esusu Invitation Reminder</h2>
+              <p>Hi ${participant.user.fullName},</p>
+              <p>${creatorName} is waiting for your response to join the Esusu "<strong>${esusu.name}</strong>" in the ${esusu.community.name} community.</p>
+              <p><strong>Response Deadline:</strong> ${deadline}</p>
+              <p>Open the FinSquare app to accept or decline this invitation.</p>
+              <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #eee;">
+                <p style="color: #666; font-size: 12px;">This is a reminder from FinSquare.</p>
+              </div>
+            </div>
+          `,
+        ).catch((err) => console.error('Failed to send reminder email:', err));
+      }
+
+      remindersSent++;
+    }
+
+    return {
+      success: true,
+      message: `Reminders sent to ${remindersSent} participant${remindersSent > 1 ? 's' : ''}`,
+      data: { remindersSent },
+    };
+  }
 }
