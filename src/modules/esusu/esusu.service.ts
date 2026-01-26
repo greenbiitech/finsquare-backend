@@ -1250,6 +1250,51 @@ export class EsusuService {
           ).catch((err) => console.error('Failed to send cancellation email to member:', err));
         }
       }
+
+      // Notify remaining PENDING (INVITED) participants about cancellation
+      // Exclude the person who just declined and the creator
+      const pendingParticipants = await this.prisma.esusuParticipant.findMany({
+        where: {
+          esusuId,
+          inviteStatus: EsusuInviteStatus.INVITED,
+          userId: { notIn: [userId, esusu.creatorId] },
+        },
+      });
+
+      const pendingUserIds = pendingParticipants.map((p) => p.userId);
+      const pendingUsers = await this.prisma.user.findMany({
+        where: { id: { in: pendingUserIds } },
+        select: { id: true, fullName: true, email: true },
+      });
+
+      for (const user of pendingUsers) {
+        this.notificationsService.sendToUser(
+          user.id,
+          'Esusu Invitation Expired',
+          `"${esusu.name}" has been cancelled before you could respond.`,
+          {
+            type: 'esusu_cancelled',
+            esusuId,
+            esusuName: esusu.name,
+          },
+        ).catch((err) => console.error('Failed to send cancellation notification to pending member:', err));
+
+        if (user.email) {
+          this.zeptomailService.sendEmail(
+            user.email,
+            `Esusu Invitation Expired - ${esusu.name}`,
+            `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #8B20E9;">Esusu Invitation Expired</h2>
+                <p>Hi ${user.fullName},</p>
+                <p>The Esusu "<strong>${esusu.name}</strong>" that you were invited to has been cancelled due to insufficient participants.</p>
+                <p>The invitation is no longer valid.</p>
+                <p>Best regards,<br>The FinSquare Team</p>
+              </div>
+            `,
+          ).catch((err) => console.error('Failed to send cancellation email to pending member:', err));
+        }
+      }
     } else {
       // Esusu continues - just notify admin about the decline
       if (creator && participantUser) {
