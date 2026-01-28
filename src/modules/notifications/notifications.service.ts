@@ -300,8 +300,9 @@ export class NotificationsService implements OnModuleInit {
     message: string;
     data?: Record<string, any>;
   }): Promise<void> {
+    this.logger.log(`Creating in-app notification: ${params.type} for user ${params.userId}`);
     try {
-      await this.prisma.inAppNotification.create({
+      const notification = await this.prisma.inAppNotification.create({
         data: {
           userId: params.userId,
           communityId: params.communityId,
@@ -312,9 +313,11 @@ export class NotificationsService implements OnModuleInit {
           data: params.data,
         },
       });
-      this.logger.log(`In-app notification created for user ${params.userId}: ${params.type}`);
-    } catch (error) {
-      this.logger.error('Failed to create in-app notification', error);
+      this.logger.log(`In-app notification created successfully: ${notification.id} for user ${params.userId}: ${params.type}`);
+    } catch (error: any) {
+      this.logger.error(`Failed to create in-app notification for user ${params.userId}: ${params.type}`);
+      this.logger.error(`Error details: ${error?.message || error}`);
+      this.logger.error(error?.stack || 'No stack trace');
     }
   }
 
