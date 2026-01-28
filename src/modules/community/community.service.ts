@@ -3,6 +3,7 @@ import {
   BadRequestException,
   NotFoundException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -23,6 +24,8 @@ import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class CommunityService {
+  private readonly logger = new Logger(CommunityService.name);
+
   constructor(
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
@@ -367,6 +370,31 @@ export class CommunityService {
       },
       orderBy: { createdAt: 'asc' },
     });
+
+    // Check if invite exists but is expired - auto-regenerate it
+    if (invite && invite.expiresAt && new Date() > invite.expiresAt) {
+      this.logger.log(`Invite link ${invite.token} has expired, auto-regenerating...`);
+
+      // Deactivate the old invite
+      await this.prisma.communityInvite.update({
+        where: { id: invite.id },
+        data: { isActive: false },
+      });
+
+      // Create new invite with same joinType but no expiration
+      const inviteToken = this.generateInviteToken();
+      invite = await this.prisma.communityInvite.create({
+        data: {
+          communityId,
+          type: InviteType.LINK,
+          joinType: invite.joinType,
+          token: inviteToken,
+          isActive: true,
+        },
+      });
+
+      this.logger.log(`New invite link created: ${invite.token}`);
+    }
 
     // If no invite link exists, create one
     if (!invite) {
@@ -714,7 +742,7 @@ export class CommunityService {
     }
 
     // Get the active LINK invite (there should only be one)
-    const invite = await this.prisma.communityInvite.findFirst({
+    let invite = await this.prisma.communityInvite.findFirst({
       where: {
         communityId,
         type: InviteType.LINK,
@@ -722,10 +750,36 @@ export class CommunityService {
       },
     });
 
+    // Check if invite exists but is expired - auto-regenerate it
+    if (invite && invite.expiresAt && new Date() > invite.expiresAt) {
+      this.logger.log(`Invite link ${invite.token} has expired, auto-regenerating...`);
+
+      // Deactivate the old invite
+      await this.prisma.communityInvite.update({
+        where: { id: invite.id },
+        data: { isActive: false },
+      });
+
+      // Create new invite with same joinType but no expiration
+      const token = this.generateInviteToken();
+      invite = await this.prisma.communityInvite.create({
+        data: {
+          communityId,
+          type: InviteType.LINK,
+          joinType: invite.joinType,
+          token,
+          isActive: true,
+          // No expiration for auto-regenerated links
+        },
+      });
+
+      this.logger.log(`New invite link created: ${invite.token}`);
+    }
+
     if (!invite) {
       // Create a default invite link if none exists
       const token = this.generateInviteToken();
-      const newInvite = await this.prisma.communityInvite.create({
+      invite = await this.prisma.communityInvite.create({
         data: {
           communityId,
           type: InviteType.LINK,
@@ -734,19 +788,6 @@ export class CommunityService {
           isActive: true,
         },
       });
-
-      return {
-        success: true,
-        message: 'Invite link configuration retrieved',
-        data: {
-          inviteLink: `${this.getInviteLinkBaseUrl()}/invite/${newInvite.token}`,
-          token: newInvite.token,
-          joinType: newInvite.joinType,
-          expiresAt: newInvite.expiresAt,
-          usedCount: newInvite.usedCount,
-          communityName: membership.community.name,
-        },
-      };
     }
 
     return {

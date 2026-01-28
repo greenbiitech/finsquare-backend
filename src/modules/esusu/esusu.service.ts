@@ -774,10 +774,11 @@ export class EsusuService {
         },
       };
     } else {
-      // Member sees only Esusus they're part of
+      // Member sees only Esusus they've ACCEPTED (invited ones show only in Hub Activity)
       const participations = await this.prisma.esusuParticipant.findMany({
         where: {
           userId,
+          inviteStatus: EsusuInviteStatus.ACCEPTED, // Only show accepted Esusus in list
           esusu: {
             communityId,
             status: { in: statusFilter },
@@ -1812,6 +1813,7 @@ export class EsusuService {
         frequency: esusu.frequency,
         targetMembers: esusu.numberOfParticipants,
         startDate: esusu.collectionDate,
+        participationDeadline: esusu.participationDeadline,
         status: esusu.status,
         payoutOrderType: esusu.payoutOrderType,
         participants,
