@@ -839,7 +839,7 @@ export class EsusuService {
       throw new ForbiddenException('Only community admins can access this');
     }
 
-    // Get all community members
+    // Get all community members with wallet status
     const members = await this.prisma.membership.findMany({
       where: { communityId },
       include: {
@@ -851,6 +851,7 @@ export class EsusuService {
             fullName: true,
             email: true,
             photo: true,
+            walletSetupStep: true,
           },
         },
       },
@@ -874,6 +875,7 @@ export class EsusuService {
           role: m.role,
           isAdmin: m.role === CommunityRole.ADMIN,
           isCurrentUser: m.user.id === userId,
+          hasActiveWallet: m.user.walletSetupStep === 'COMPLETED',
         })),
         totalCount: members.length,
       },
