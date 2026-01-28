@@ -256,9 +256,21 @@ export class EsusuService {
       throw new BadRequestException('One or more participants are not members of this community');
     }
 
-    // 7. Validate commission
-    if (dto.takeCommission && (!dto.commissionPercentage || dto.commissionPercentage < 1 || dto.commissionPercentage > 50)) {
-      throw new BadRequestException('Commission percentage must be between 1% and 50%');
+    // 7. Validate commission based on type
+    if (dto.takeCommission) {
+      if (!dto.commissionType) {
+        throw new BadRequestException('Commission type is required when taking commission');
+      }
+
+      if (dto.commissionType === 'PERCENTAGE') {
+        if (!dto.commissionPercentage || dto.commissionPercentage < 5 || dto.commissionPercentage > 50) {
+          throw new BadRequestException('Commission percentage must be between 5% and 50%');
+        }
+      } else if (dto.commissionType === 'CASH') {
+        if (!dto.commissionAmount || dto.commissionAmount < 1) {
+          throw new BadRequestException('Commission amount must be at least 1');
+        }
+      }
     }
 
     // 7.1 Validate admin slot if provided (for FCFS when admin is participating)
