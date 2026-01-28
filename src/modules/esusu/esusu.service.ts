@@ -14,6 +14,7 @@ import {
   PaymentFrequency,
   PayoutOrderType,
   CommissionType,
+  NotificationFeature,
 } from '@prisma/client';
 import { CreateEsusuDto, PaymentFrequencyDto, PayoutOrderTypeDto } from './dto';
 
@@ -351,6 +352,7 @@ export class EsusuService {
       result.name,
       membership.user.fullName,
       membership.community.name,
+      dto.communityId,
       memberships,
       userId,
       dto.contributionAmount,
@@ -403,6 +405,7 @@ export class EsusuService {
     esusuName: string,
     creatorName: string,
     communityName: string,
+    communityId: string,
     memberships: any[],
     creatorId: string,
     contributionAmount: number,
@@ -445,6 +448,17 @@ export class EsusuService {
           },
         ).catch((err) => console.error('Failed to send Esusu creation push notification:', err));
 
+        // Create in-app notification for creator
+        this.notificationsService.createInAppNotification({
+          userId: membership.user.id,
+          communityId,
+          feature: NotificationFeature.ESUSU,
+          type: 'esusu_created',
+          title: 'Esusu Created Successfully',
+          message: `Your Esusu "${esusuName}" has been created. Invitations have been sent to ${numberOfParticipants - 1} members.`,
+          data: { esusuId, esusuName, communityName },
+        }).catch((err) => console.error('Failed to create in-app notification:', err));
+
         // Send confirmation email to the creator
         if (membership.user.email) {
           this.zeptomailService.sendEmail(
@@ -478,6 +492,17 @@ export class EsusuService {
             creatorName,
           },
         ).catch((err) => console.error('Failed to send Esusu invite push notification:', err));
+
+        // Create in-app notification for invited participant
+        this.notificationsService.createInAppNotification({
+          userId: membership.user.id,
+          communityId,
+          feature: NotificationFeature.ESUSU,
+          type: 'esusu_invite',
+          title: `${creatorName} invited you to join Esusu`,
+          message: `You've been invited to join "${esusuName}". Tap to view details.`,
+          data: { esusuId, esusuName, communityName, creatorName },
+        }).catch((err) => console.error('Failed to create in-app notification:', err));
 
         // Email notification
         if (membership.user.email) {
@@ -556,10 +581,11 @@ export class EsusuService {
         },
       };
     } else {
-      // Member sees only Esusus they're part of
+      // Member sees only Esusus they've ACCEPTED (not pending invitations)
       const participations = await this.prisma.esusuParticipant.findMany({
         where: {
           userId,
+          inviteStatus: EsusuInviteStatus.ACCEPTED, // Only count accepted invitations
           esusu: {
             communityId,
             status: {
@@ -579,13 +605,10 @@ export class EsusuService {
       let total = 0;
       let active = 0;
       let pendingMembers = 0;
-      let pendingInvitation = 0;
 
       for (const p of participations) {
         total++;
-        if (p.inviteStatus === EsusuInviteStatus.INVITED) {
-          pendingInvitation++;
-        } else if (p.esusu.status === EsusuStatus.ACTIVE) {
+        if (p.esusu.status === EsusuStatus.ACTIVE) {
           active++;
         } else if (p.esusu.status === EsusuStatus.PENDING_MEMBERS) {
           pendingMembers++;
@@ -598,7 +621,6 @@ export class EsusuService {
           total,
           active,
           pendingMembers,
-          pendingInvitation,
           isAdmin: false,
         },
       };
@@ -1113,6 +1135,17 @@ export class EsusuService {
               esusuName: esusu.name,
             },
           ).catch((err) => console.error('Failed to send ready notification:', err));
+
+          // In-app notification for ready status
+          this.notificationsService.createInAppNotification({
+            userId: creator.id,
+            communityId: esusu.communityId,
+            feature: NotificationFeature.ESUSU,
+            type: 'esusu_ready',
+            title: 'All Members Accepted!',
+            message: `All members have accepted the invitation for "${esusu.name}". The Esusu is ready to start!`,
+            data: { esusuId, esusuName: esusu.name },
+          }).catch((err) => console.error('Failed to create in-app notification:', err));
         }
       }
 
@@ -1129,6 +1162,17 @@ export class EsusuService {
             memberName: participantUser.fullName,
           },
         ).catch((err) => console.error('Failed to send accept notification:', err));
+
+        // In-app notification for acceptance
+        this.notificationsService.createInAppNotification({
+          userId: creator.id,
+          communityId: esusu.communityId,
+          feature: NotificationFeature.ESUSU,
+          type: 'esusu_invite_accepted',
+          title: `${participantUser.fullName} accepted Esusu invite`,
+          message: `${participantUser.fullName} has accepted the invitation to join "${esusu.name}".`,
+          data: { esusuId, esusuName: esusu.name, memberName: participantUser.fullName },
+        }).catch((err) => console.error('Failed to create in-app notification:', err));
       }
 
       // Send confirmation to member
@@ -1144,6 +1188,17 @@ export class EsusuService {
             esusuName: esusu.name,
           },
         ).catch((err) => console.error('Failed to send member join notification:', err));
+
+        // In-app notification for joining
+        this.notificationsService.createInAppNotification({
+          userId: participantUser.id,
+          communityId: esusu.communityId,
+          feature: NotificationFeature.ESUSU,
+          type: 'esusu_joined',
+          title: 'Esusu Joined Successfully!',
+          message: `You have successfully joined "${esusu.name}". You'll be notified when the Esusu starts.`,
+          data: { esusuId, esusuName: esusu.name },
+        }).catch((err) => console.error('Failed to create in-app notification:', err));
 
         // Email to member
         const contributionAmount = esusu.contributionAmount.toNumber().toLocaleString();
@@ -1221,6 +1276,17 @@ export class EsusuService {
           },
         ).catch((err) => console.error('Failed to send cancellation notification to creator:', err));
 
+        // In-app notification for cancellation
+        this.notificationsService.createInAppNotification({
+          userId: creator.id,
+          communityId: esusu.communityId,
+          feature: NotificationFeature.ESUSU,
+          type: 'esusu_cancelled',
+          title: 'Esusu Cancelled',
+          message: `"${esusu.name}" has been cancelled due to insufficient participants.`,
+          data: { esusuId, esusuName: esusu.name },
+        }).catch((err) => console.error('Failed to create in-app notification:', err));
+
         // Email to admin
         if (creator.email) {
           this.zeptomailService.sendEmail(
@@ -1268,6 +1334,17 @@ export class EsusuService {
           },
         ).catch((err) => console.error('Failed to send cancellation notification to member:', err));
 
+        // In-app notification for accepted members
+        this.notificationsService.createInAppNotification({
+          userId: user.id,
+          communityId: esusu.communityId,
+          feature: NotificationFeature.ESUSU,
+          type: 'esusu_cancelled',
+          title: 'Esusu Cancelled',
+          message: `"${esusu.name}" has been cancelled due to insufficient participants.`,
+          data: { esusuId, esusuName: esusu.name },
+        }).catch((err) => console.error('Failed to create in-app notification:', err));
+
         if (user.email) {
           this.zeptomailService.sendEmail(
             user.email,
@@ -1313,6 +1390,17 @@ export class EsusuService {
           },
         ).catch((err) => console.error('Failed to send cancellation notification to pending member:', err));
 
+        // In-app notification for pending members
+        this.notificationsService.createInAppNotification({
+          userId: user.id,
+          communityId: esusu.communityId,
+          feature: NotificationFeature.ESUSU,
+          type: 'esusu_invitation_expired',
+          title: 'Esusu Invitation Expired',
+          message: `"${esusu.name}" has been cancelled before you could respond.`,
+          data: { esusuId, esusuName: esusu.name },
+        }).catch((err) => console.error('Failed to create in-app notification:', err));
+
         if (user.email) {
           this.zeptomailService.sendEmail(
             user.email,
@@ -1344,6 +1432,17 @@ export class EsusuService {
             memberName: participantUser.fullName,
           },
         ).catch((err) => console.error('Failed to send decline notification to creator:', err));
+
+        // In-app notification for decline
+        this.notificationsService.createInAppNotification({
+          userId: creator.id,
+          communityId: esusu.communityId,
+          feature: NotificationFeature.ESUSU,
+          type: 'esusu_invite_declined',
+          title: `${participantUser.fullName} declined Esusu invite`,
+          message: `${participantUser.fullName} declined the invitation to join "${esusu.name}".`,
+          data: { esusuId, esusuName: esusu.name, memberName: participantUser.fullName },
+        }).catch((err) => console.error('Failed to create in-app notification:', err));
 
         // Email notification to admin
         if (creator.email) {
@@ -1580,6 +1679,17 @@ export class EsusuService {
             esusuName: esusu.name,
           },
         ).catch((err) => console.error('Failed to send ready notification:', err));
+
+        // In-app notification for all slots selected
+        this.notificationsService.createInAppNotification({
+          userId: creator.id,
+          communityId: esusu.communityId,
+          feature: NotificationFeature.ESUSU,
+          type: 'esusu_ready',
+          title: 'All Slots Selected!',
+          message: `All participants have selected their slots for "${esusu.name}". The Esusu is ready to start!`,
+          data: { esusuId, esusuName: esusu.name },
+        }).catch((err) => console.error('Failed to create in-app notification:', err));
       }
     }
 
@@ -1779,6 +1889,17 @@ export class EsusuService {
           communityName,
         },
       ).catch((err) => console.error('Failed to send reminder push notification:', err));
+
+      // In-app notification for reminder
+      this.notificationsService.createInAppNotification({
+        userId: user.id,
+        communityId: esusu.communityId,
+        feature: NotificationFeature.ESUSU,
+        type: 'esusu_reminder',
+        title: 'Esusu Invitation Reminder',
+        message: `${creatorName} is waiting for your response to join "${esusu.name}". Respond before ${deadline}.`,
+        data: { esusuId, esusuName: esusu.name, communityName },
+      }).catch((err) => console.error('Failed to create in-app notification:', err));
 
       // Email notification
       if (user.email) {

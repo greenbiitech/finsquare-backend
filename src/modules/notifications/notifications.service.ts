@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import * as admin from 'firebase-admin';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DevicePlatform } from './dto';
+import { NotificationFeature } from '@prisma/client';
 
 @Injectable()
 export class NotificationsService implements OnModuleInit {
@@ -281,5 +282,142 @@ export class NotificationsService implements OnModuleInit {
     } catch (error) {
       this.logger.error('Failed to invalidate token', error);
     }
+  }
+
+  // ============================================
+  // IN-APP NOTIFICATIONS
+  // ============================================
+
+  /**
+   * Create an in-app notification
+   */
+  async createInAppNotification(params: {
+    userId: string;
+    communityId?: string;
+    feature: NotificationFeature;
+    type: string;
+    title: string;
+    message: string;
+    data?: Record<string, any>;
+  }): Promise<void> {
+    try {
+      await this.prisma.inAppNotification.create({
+        data: {
+          userId: params.userId,
+          communityId: params.communityId,
+          feature: params.feature,
+          type: params.type,
+          title: params.title,
+          message: params.message,
+          data: params.data,
+        },
+      });
+      this.logger.log(`In-app notification created for user ${params.userId}: ${params.type}`);
+    } catch (error) {
+      this.logger.error('Failed to create in-app notification', error);
+    }
+  }
+
+  /**
+   * Get in-app notifications for a user (with pagination)
+   */
+  async getInAppNotifications(
+    userId: string,
+    communityId?: string,
+    page: number = 1,
+    limit: number = 20,
+  ) {
+    const skip = (page - 1) * limit;
+
+    const where: any = { userId };
+    if (communityId) {
+      where.communityId = communityId;
+    }
+
+    const [notifications, total] = await Promise.all([
+      this.prisma.inAppNotification.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.inAppNotification.count({ where }),
+    ]);
+
+    return {
+      success: true,
+      data: {
+        notifications: notifications.map((n) => ({
+          id: n.id,
+          feature: n.feature,
+          type: n.type,
+          title: n.title,
+          message: n.message,
+          data: n.data,
+          isRead: n.isRead,
+          createdAt: n.createdAt,
+        })),
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      },
+    };
+  }
+
+  /**
+   * Get unread notification count for a user
+   */
+  async getUnreadCount(userId: string, communityId?: string) {
+    const where: any = { userId, isRead: false };
+    if (communityId) {
+      where.communityId = communityId;
+    }
+
+    const count = await this.prisma.inAppNotification.count({ where });
+
+    return {
+      success: true,
+      data: { unreadCount: count },
+    };
+  }
+
+  /**
+   * Mark a notification as read
+   */
+  async markAsRead(userId: string, notificationId: string) {
+    const notification = await this.prisma.inAppNotification.findFirst({
+      where: { id: notificationId, userId },
+    });
+
+    if (!notification) {
+      return { success: false, message: 'Notification not found' };
+    }
+
+    await this.prisma.inAppNotification.update({
+      where: { id: notificationId },
+      data: { isRead: true },
+    });
+
+    return { success: true, message: 'Notification marked as read' };
+  }
+
+  /**
+   * Mark all notifications as read for a user
+   */
+  async markAllAsRead(userId: string, communityId?: string) {
+    const where: any = { userId, isRead: false };
+    if (communityId) {
+      where.communityId = communityId;
+    }
+
+    await this.prisma.inAppNotification.updateMany({
+      where,
+      data: { isRead: true },
+    });
+
+    return { success: true, message: 'All notifications marked as read' };
   }
 }

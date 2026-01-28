@@ -281,6 +281,37 @@ model WithdrawalAccount {
 }
 
 // ============================================
+// IN-APP NOTIFICATIONS
+// ============================================
+
+model InAppNotification {
+  id            String                   @id @default(uuid())
+  userId        String                   // Recipient user
+  communityId   String?                  // Community context (optional)
+  feature       NotificationFeature      // ESUSU, DUES, CONTRIBUTIONS, etc.
+  type          String                   // Specific notification type (e.g., "esusu_invite", "esusu_accepted")
+  title         String                   // Notification title
+  message       String                   // Notification message
+  data          Json?                    // Additional data (esusuId, esusuName, etc.)
+  isRead        Boolean                  @default(false)
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+
+  @@index([userId])
+  @@index([userId, communityId])
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("in_app_notifications")
+}
+
+enum NotificationFeature {
+  ESUSU
+  DUES
+  CONTRIBUTIONS
+  GROUP_BUYING
+}
+
+// ============================================
 // ESUSU MODELS
 // ============================================
 
