@@ -28,6 +28,11 @@ export enum PayoutOrderTypeDto {
   FIRST_COME_FIRST_SERVED = 'FIRST_COME_FIRST_SERVED',
 }
 
+export enum CommissionTypeDto {
+  CASH = 'CASH',
+  PERCENTAGE = 'PERCENTAGE',
+}
+
 class ParticipantDto {
   @ApiProperty({ description: 'User ID of the participant' })
   @IsString()
@@ -85,12 +90,23 @@ export class CreateEsusuDto {
   @IsBoolean()
   takeCommission: boolean;
 
-  @ApiPropertyOptional({ description: 'Commission percentage (1-50%)', minimum: 1, maximum: 50 })
+  @ApiPropertyOptional({ description: 'Commission type (CASH or PERCENTAGE)', enum: CommissionTypeDto })
+  @IsEnum(CommissionTypeDto)
+  @IsOptional()
+  commissionType?: CommissionTypeDto;
+
+  @ApiPropertyOptional({ description: 'Commission percentage (5-50%)', minimum: 5, maximum: 50 })
   @IsNumber()
   @IsOptional()
-  @Min(1, { message: 'Commission must be at least 1%' })
+  @Min(5, { message: 'Commission must be at least 5%' })
   @Max(50, { message: 'Commission cannot exceed 50%' })
   commissionPercentage?: number;
+
+  @ApiPropertyOptional({ description: 'Fixed commission amount (for CASH type)', minimum: 1 })
+  @IsNumber()
+  @IsOptional()
+  @Min(1, { message: 'Commission amount must be at least 1' })
+  commissionAmount?: number;
 
   @ApiProperty({ description: 'Payout order type', enum: PayoutOrderTypeDto })
   @IsEnum(PayoutOrderTypeDto)

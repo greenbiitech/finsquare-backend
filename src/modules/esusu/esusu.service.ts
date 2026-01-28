@@ -13,6 +13,7 @@ import {
   EsusuInviteStatus,
   PaymentFrequency,
   PayoutOrderType,
+  CommissionType,
 } from '@prisma/client';
 import { CreateEsusuDto, PaymentFrequencyDto, PayoutOrderTypeDto } from './dto';
 
@@ -287,7 +288,15 @@ export class EsusuService {
           participationDeadline: deadline,
           collectionDate: collectionDate,
           takeCommission: dto.takeCommission,
-          commissionPercentage: dto.takeCommission ? dto.commissionPercentage : null,
+          commissionType: dto.takeCommission && dto.commissionType
+            ? (dto.commissionType as unknown as CommissionType)
+            : null,
+          commissionPercentage: dto.takeCommission && dto.commissionType === 'PERCENTAGE'
+            ? dto.commissionPercentage
+            : null,
+          commissionAmount: dto.takeCommission && dto.commissionType === 'CASH'
+            ? dto.commissionAmount
+            : null,
           payoutOrderType: payoutOrderMap[dto.payoutOrderType],
           status: EsusuStatus.PENDING_MEMBERS,
           currentCycle: 0,

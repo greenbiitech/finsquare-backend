@@ -297,7 +297,9 @@ model Esusu {
   participationDeadline   DateTime
   collectionDate          DateTime
   takeCommission          Boolean             @default(false)
-  commissionPercentage    Int?                // 1-50
+  commissionType          CommissionType?     // CASH or PERCENTAGE
+  commissionPercentage    Int?                // 5-50 (for percentage type)
+  commissionAmount        Decimal?            @db.Decimal(12, 2) // Fixed amount (for cash type)
   platformFeePercentage   Decimal             @default(1.5) @db.Decimal(5, 2)
   payoutOrderType         PayoutOrderType
   status                  EsusuStatus         @default(PENDING_MEMBERS)
@@ -488,6 +490,11 @@ enum PaymentFrequency {
 enum PayoutOrderType {
   RANDOM
   FIRST_COME_FIRST_SERVED
+}
+
+enum CommissionType {
+  CASH
+  PERCENTAGE
 }
 
 enum EsusuStatus {
