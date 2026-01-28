@@ -260,6 +260,22 @@ export class EsusuService {
       throw new BadRequestException('Commission percentage must be between 1% and 50%');
     }
 
+    // 7.1 Validate admin slot if provided (for FCFS when admin is participating)
+    const isAdminParticipating = participantIds.includes(userId);
+    const isFCFS = dto.payoutOrderType === PayoutOrderTypeDto.FIRST_COME_FIRST_SERVED;
+
+    if (dto.adminSlot !== undefined && dto.adminSlot !== null) {
+      if (!isFCFS) {
+        throw new BadRequestException('Admin slot selection is only valid for First Come First Served payout order');
+      }
+      if (!isAdminParticipating) {
+        throw new BadRequestException('Admin slot selection is only valid when admin is participating');
+      }
+      if (dto.adminSlot < 1 || dto.adminSlot > dto.numberOfParticipants) {
+        throw new BadRequestException(`Slot number must be between 1 and ${dto.numberOfParticipants}`);
+      }
+    }
+
     // 8. Map frequency and payout order type
     const frequencyMap: Record<PaymentFrequencyDto, PaymentFrequency> = {
       [PaymentFrequencyDto.WEEKLY]: PaymentFrequency.WEEKLY,
@@ -305,15 +321,22 @@ export class EsusuService {
 
       // Create participant records
       // Creator is auto-accepted (they created it, so they don't need to accept their own invitation)
-      const participantRecords = participantIds.map((participantUserId) => ({
-        esusuId: esusu.id,
-        userId: participantUserId,
-        inviteStatus: participantUserId === userId
-          ? EsusuInviteStatus.ACCEPTED
-          : EsusuInviteStatus.INVITED,
-        isCreator: participantUserId === userId,
-        respondedAt: participantUserId === userId ? new Date() : null,
-      }));
+      // If admin is participating with FCFS and has pre-selected a slot, assign it
+      const participantRecords = participantIds.map((participantUserId) => {
+        const isCreatorParticipant = participantUserId === userId;
+        const shouldAssignSlot = isCreatorParticipant && isFCFS && dto.adminSlot !== undefined && dto.adminSlot !== null;
+
+        return {
+          esusuId: esusu.id,
+          userId: participantUserId,
+          inviteStatus: isCreatorParticipant
+            ? EsusuInviteStatus.ACCEPTED
+            : EsusuInviteStatus.INVITED,
+          isCreator: isCreatorParticipant,
+          respondedAt: isCreatorParticipant ? new Date() : null,
+          slotNumber: shouldAssignSlot ? dto.adminSlot : null,
+        };
+      });
 
       await tx.esusuParticipant.createMany({
         data: participantRecords,

@@ -118,4 +118,10 @@ export class CreateEsusuDto {
   @Type(() => ParticipantDto)
   @ArrayMinSize(3, { message: 'At least 3 participants required' })
   participants: ParticipantDto[];
+
+  @ApiPropertyOptional({ description: 'Admin pre-selected slot number (for FCFS when admin participates)', minimum: 1 })
+  @IsNumber()
+  @IsOptional()
+  @Min(1, { message: 'Slot number must be at least 1' })
+  adminSlot?: number;
 }
